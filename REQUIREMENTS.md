@@ -107,10 +107,11 @@ outlet: MLXArray [B, H/8, W/8, 4]                        ← noise prediction (v
 **Shape contract properties**:
 - `expectedConditioningDim: 4096` — matches T5XXLEncoder's `outputEmbeddingDim`
 - `outputLatentChannels: 4` — matches SDXLVAEDecoder's `expectedInputChannels`
+- `expectedMaxSequenceLength: 120` — matches T5XXLEncoderConfiguration's `maxSequenceLength`
 
 The backbone expects T5-XXL embeddings (dim 4096) as conditioning. This is validated at pipeline assembly time — connecting a CLIP encoder (dim 768) would fail.
 
-**Lifecycle**: Conforms to `WeightedSegment` (see SwiftTubería §R2.0). The pipeline loads weights via `WeightLoader` using the backbone's `keyMapping` and `tensorTransform`, then calls `apply(weights:)`.
+**Lifecycle**: Conforms to `WeightedSegment` (see SwiftTubería `requirements/PROTOCOLS.md`). The pipeline loads weights via `WeightLoader` using the backbone's `keyMapping` and `tensorTransform`, then calls `apply(weights:)`.
 
 ---
 
@@ -156,7 +157,7 @@ The PixArt recipe connects catalog components with the custom backbone:
 
 ### P4.1 Recipe Configuration Values
 
-The `PixArtRecipe` provides configuration values for each catalog component. Configuration types are defined in SwiftTubería §R4.5 / §R16.4.
+The `PixArtRecipe` provides configuration values for each catalog component. Configuration types are defined in SwiftTubería `requirements/CATALOG.md`.
 
 ```swift
 struct PixArtRecipe: PipelineRecipe {
@@ -217,7 +218,7 @@ Components registered into SwiftAcervo's Component Registry at import time:
 | T5-XXL | `t5-xxl-encoder-int4` | encoder | ~1.2 GB | intrusive-memory CDN |
 | SDXL VAE | `sdxl-vae-decoder-fp16` | decoder | ~160 MB | existing SDXL VAE |
 
-T5-XXL and SDXL VAE are **catalog components** — their Acervo descriptors are authoritatively defined in SwiftTubería (§R4.6). TuberíaCatalog registers them at import time. This package re-registers them for safety (Acervo deduplicates by component ID; same ID + same repo = no-op). The values below MUST match SwiftTubería §R4.6.
+T5-XXL and SDXL VAE are **catalog components** — their Acervo descriptors are authoritatively defined in SwiftTubería `requirements/CATALOG.md` § Catalog Component Acervo Descriptors. TuberíaCatalog registers them at import time. This package re-registers them for safety (Acervo deduplicates by component ID; same ID + same repo = no-op). The values below MUST match SwiftTubería `requirements/CATALOG.md` § Catalog Component Acervo Descriptors.
 
 Pipeline code accesses these components exclusively through `AcervoManager.shared.withComponentAccess(id)` — never through file paths.
 
@@ -231,7 +232,7 @@ public enum PixArtComponents {
                                 type: .backbone,
                                 huggingFaceRepo: "intrusive-memory/pixart-sigma-xl-dit-int4-mlx",
                                 ...),
-            // Catalog components — values from SwiftTubería §R4.6 (re-registered for safety)
+            // Catalog components — values from SwiftTubería `requirements/CATALOG.md` § Catalog Component Acervo Descriptors (re-registered for safety)
             ComponentDescriptor(id: "t5-xxl-encoder-int4",
                                 type: .encoder,
                                 huggingFaceRepo: "intrusive-memory/t5-xxl-int4-mlx",
@@ -252,8 +253,8 @@ Swift guarantees this initializer is thread-safe and runs exactly once. Pipeline
 | Component | HuggingFace Repo | Notes |
 |---|---|---|
 | PixArt-Sigma XL DiT (int4) | `intrusive-memory/pixart-sigma-xl-dit-int4-mlx` | Owned by this package — created during weight conversion (P7) |
-| T5-XXL (int4) | `intrusive-memory/t5-xxl-int4-mlx` | Catalog component — authoritative definition in SwiftTubería §R4.6 |
-| SDXL VAE (fp16) | `intrusive-memory/sdxl-vae-fp16-mlx` | Catalog component — authoritative definition in SwiftTubería §R4.6 |
+| T5-XXL (int4) | `intrusive-memory/t5-xxl-int4-mlx` | Catalog component — authoritative definition in SwiftTubería `requirements/CATALOG.md` § Catalog Component Acervo Descriptors |
+| SDXL VAE (fp16) | `intrusive-memory/sdxl-vae-fp16-mlx` | Catalog component — authoritative definition in SwiftTubería `requirements/CATALOG.md` § Catalog Component Acervo Descriptors |
 
 The T5-XXL and SDXL VAE repos are shared with all future consumers of these catalog components. The PixArt DiT repo is owned by this package. All repos are created during weight conversion (P7) and populated with MLX safetensors plus `config.json`.
 
@@ -265,7 +266,7 @@ PixArt LoRA adapters target the DiT transformer's attention layers:
 - Self-attention: Q, K, V, output projections (per block)
 - Cross-attention: Q, K, V, output projections (per block)
 
-SwiftTubería's LoRA infrastructure applies adapters to all keys in the LoRA safetensors file that match the loaded model's keys (see SwiftTubería §R7). The backbone's `keyMapping` is reused for LoRA key translation — no separate LoRA target declaration is needed.
+SwiftTubería's LoRA infrastructure applies adapters to all keys in the LoRA safetensors file that match the loaded model's keys (see SwiftTubería `requirements/PIPELINE.md` § LoRA System). The backbone's `keyMapping` is reused for LoRA key translation — no separate LoRA target declaration is needed.
 
 **Constraint**: Single active LoRA per generation (same constraint as FLUX). Multiple LoRAs require sequential load/unload. SwiftTubería's LoRA infrastructure can lift this constraint in a future version by supporting `[LoRAConfig]` with per-adapter scaling.
 
