@@ -206,6 +206,16 @@ public enum PixArtComponents {
 ```
 Swift guarantees this initializer is thread-safe and runs exactly once. Pipeline assembly can call `_ = PixArtComponents.registered` as a defensive trigger.
 
+**HuggingFace repo conventions**: Converted model weights are hosted under the `intrusive-memory` HuggingFace organization. Exact repo names follow the pattern `intrusive-memory/{model}-mlx`:
+
+| Component | HuggingFace Repo | Status |
+|---|---|---|
+| PixArt-Sigma XL DiT (int4) | `intrusive-memory/pixart-sigma-xl-dit-int4-mlx` | TBD — created during weight conversion (P7) |
+| T5-XXL (int4) | `intrusive-memory/t5-xxl-int4-mlx` | TBD — shared with future T5 consumers |
+| SDXL VAE (fp16) | `intrusive-memory/sdxl-vae-fp16-mlx` | TBD — shared with future SDXL consumers |
+
+These repo names are provisional. Final names are determined during weight conversion (P7) and recorded in the `ComponentDescriptor` entries. Agents implementing P5 should use the repo names from this table as defaults, updating them if weight conversion produces different artifacts.
+
 ---
 
 ## P6. LoRA Support
