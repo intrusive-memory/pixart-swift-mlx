@@ -154,14 +154,44 @@ The PixArt recipe connects catalog components with the custom backbone:
 - PixArtDiT outlet: latents [B, H/8, W/8, 4] → SDXLVAEDecoder inlet: expects 4 latent channels, scale 0.13025
 - SDXLVAEDecoder outlet: pixels [B, H, W, 3] → ImageRenderer inlet: expects 3-channel float data
 
-### P4.1 Scheduler Configuration
+### P4.1 Recipe Configuration Values
+
+The `PixArtRecipe` provides configuration values for each catalog component. Configuration types are defined in SwiftTubería §R4.5 / §R16.4.
+
+```swift
+struct PixArtRecipe: PipelineRecipe {
+    typealias Encoder = T5XXLEncoder
+    typealias Sched = DPMSolverScheduler
+    typealias Back = PixArtDiT
+    typealias Dec = SDXLVAEDecoder
+    typealias Rend = ImageRenderer
+
+    var encoderConfig: T5XXLEncoderConfiguration {
+        .init(componentId: "t5-xxl-encoder-int4", maxSequenceLength: 120, embeddingDim: 4096)
+    }
+    var schedulerConfig: DPMSolverSchedulerConfiguration {
+        .init(betaSchedule: .linear(betaStart: 0.0001, betaEnd: 0.02),
+              predictionType: .epsilon, solverOrder: 2, trainTimesteps: 1000)
+    }
+    var backboneConfig: PixArtDiTConfiguration { ... }  // defined in this package
+    var decoderConfig: SDXLVAEDecoderConfiguration {
+        .init(componentId: "sdxl-vae-decoder-fp16", latentChannels: 4, scalingFactor: 0.13025)
+    }
+    var rendererConfig: Void { () }
+
+    var supportsImageToImage: Bool { false }
+    var unconditionalEmbeddingStrategy: UnconditionalEmbeddingStrategy { .emptyPrompt }
+    var allComponentIds: [String] {
+        ["t5-xxl-encoder-int4", "pixart-sigma-xl-dit-int4", "sdxl-vae-decoder-fp16"]
+    }
+    func quantizationFor(_ role: PipelineRole) -> QuantizationConfig { .asStored }
+}
+```
+
+**Default generation parameters** (used by `PixArtModelDescriptor`):
 
 | Parameter | Value |
 |---|---|
-| algorithm | DPM-Solver++ multistep |
-| beta_schedule | linear (0.0001 → 0.02) |
-| prediction_type | epsilon |
-| solver_order | 2, midpoint |
 | default_steps | 20 |
 | default_guidance | 4.5 |
 
@@ -187,7 +217,7 @@ Components registered into SwiftAcervo's Component Registry at import time:
 | T5-XXL | `t5-xxl-encoder-int4` | encoder | ~1.2 GB | intrusive-memory CDN |
 | SDXL VAE | `sdxl-vae-decoder-fp16` | decoder | ~160 MB | existing SDXL VAE |
 
-T5-XXL and SDXL VAE are catalog components — their Acervo entries may already exist if another model plugin registered them. Acervo deduplicates by component ID; re-registration is a no-op.
+T5-XXL and SDXL VAE are **catalog components** — their Acervo descriptors are authoritatively defined in SwiftTubería (§R4.6). TuberíaCatalog registers them at import time. This package re-registers them for safety (Acervo deduplicates by component ID; same ID + same repo = no-op). The values below MUST match SwiftTubería §R4.6.
 
 Pipeline code accesses these components exclusively through `AcervoManager.shared.withComponentAccess(id)` — never through file paths.
 
@@ -196,9 +226,20 @@ Pipeline code accesses these components exclusively through `AcervoManager.share
 public enum PixArtComponents {
     public static let registered: Bool = {
         Acervo.register([
-            ComponentDescriptor(id: "pixart-sigma-xl-dit-int4", ...),
-            ComponentDescriptor(id: "t5-xxl-encoder-int4", ...),
-            ComponentDescriptor(id: "sdxl-vae-decoder-fp16", ...),
+            // Model-specific — owned by this package
+            ComponentDescriptor(id: "pixart-sigma-xl-dit-int4",
+                                type: .backbone,
+                                huggingFaceRepo: "intrusive-memory/pixart-sigma-xl-dit-int4-mlx",
+                                ...),
+            // Catalog components — values from SwiftTubería §R4.6 (re-registered for safety)
+            ComponentDescriptor(id: "t5-xxl-encoder-int4",
+                                type: .encoder,
+                                huggingFaceRepo: "intrusive-memory/t5-xxl-int4-mlx",
+                                ...),
+            ComponentDescriptor(id: "sdxl-vae-decoder-fp16",
+                                type: .decoder,
+                                huggingFaceRepo: "intrusive-memory/sdxl-vae-fp16-mlx",
+                                ...),
         ])
         return true
     }()
@@ -206,15 +247,15 @@ public enum PixArtComponents {
 ```
 Swift guarantees this initializer is thread-safe and runs exactly once. Pipeline assembly can call `_ = PixArtComponents.registered` as a defensive trigger.
 
-**HuggingFace repo conventions**: Converted model weights are hosted under the `intrusive-memory` HuggingFace organization. Exact repo names follow the pattern `intrusive-memory/{model}-mlx`:
+**HuggingFace repo conventions**: Converted model weights are hosted under the `intrusive-memory` HuggingFace organization. Repo naming: `intrusive-memory/{model}-{quantization}-mlx`.
 
-| Component | HuggingFace Repo | Status |
+| Component | HuggingFace Repo | Notes |
 |---|---|---|
-| PixArt-Sigma XL DiT (int4) | `intrusive-memory/pixart-sigma-xl-dit-int4-mlx` | TBD — created during weight conversion (P7) |
-| T5-XXL (int4) | `intrusive-memory/t5-xxl-int4-mlx` | TBD — shared with future T5 consumers |
-| SDXL VAE (fp16) | `intrusive-memory/sdxl-vae-fp16-mlx` | TBD — shared with future SDXL consumers |
+| PixArt-Sigma XL DiT (int4) | `intrusive-memory/pixart-sigma-xl-dit-int4-mlx` | Owned by this package — created during weight conversion (P7) |
+| T5-XXL (int4) | `intrusive-memory/t5-xxl-int4-mlx` | Catalog component — authoritative definition in SwiftTubería §R4.6 |
+| SDXL VAE (fp16) | `intrusive-memory/sdxl-vae-fp16-mlx` | Catalog component — authoritative definition in SwiftTubería §R4.6 |
 
-These repo names are provisional. Final names are determined during weight conversion (P7) and recorded in the `ComponentDescriptor` entries. Agents implementing P5 should use the repo names from this table as defaults, updating them if weight conversion produces different artifacts.
+The T5-XXL and SDXL VAE repos are shared with all future consumers of these catalog components. The PixArt DiT repo is owned by this package. All repos are created during weight conversion (P7) and populated with MLX safetensors plus `config.json`.
 
 ---
 
@@ -224,7 +265,7 @@ PixArt LoRA adapters target the DiT transformer's attention layers:
 - Self-attention: Q, K, V, output projections (per block)
 - Cross-attention: Q, K, V, output projections (per block)
 
-The plugin declares these target layer paths. SwiftTubería's LoRA infrastructure handles loading, scaling, and unloading.
+SwiftTubería's LoRA infrastructure applies adapters to all keys in the LoRA safetensors file that match the loaded model's keys (see SwiftTubería §R7). The backbone's `keyMapping` is reused for LoRA key translation — no separate LoRA target declaration is needed.
 
 **Constraint**: Single active LoRA per generation (same constraint as FLUX). Multiple LoRAs require sequential load/unload. SwiftTubería's LoRA infrastructure can lift this constraint in a future version by supporting `[LoRAConfig]` with per-adapter scaling.
 
