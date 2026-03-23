@@ -10,23 +10,36 @@ let package = Package(
     ],
     products: [
         .library(
-            name: "PixArtMLX",
-            targets: ["PixArtMLX"]
+            name: "PixArtBackbone",
+            targets: ["PixArtBackbone"]
+        ),
+        .executable(
+            name: "PixArtCLI",
+            targets: ["PixArtCLI"]
         )
     ],
     dependencies: [
-        .package(url: "https://github.com/intrusive-memory/SwiftAcervo.git", branch: "main")
+        .package(path: "../SwiftTubería"),
+        .package(url: "https://github.com/apple/swift-argument-parser", from: "1.3.0")
     ],
     targets: [
         .target(
-            name: "PixArtMLX",
+            name: "PixArtBackbone",
             dependencies: [
-                .product(name: "SwiftAcervo", package: "SwiftAcervo")
+                .product(name: "Tuberia", package: "SwiftTubería"),
+                .product(name: "TuberiaCatalog", package: "SwiftTubería")
+            ]
+        ),
+        .executableTarget(
+            name: "PixArtCLI",
+            dependencies: [
+                "PixArtBackbone",
+                .product(name: "ArgumentParser", package: "swift-argument-parser")
             ]
         ),
         .testTarget(
-            name: "PixArtMLXTests",
-            dependencies: ["PixArtMLX"]
+            name: "PixArtBackboneTests",
+            dependencies: ["PixArtBackbone"]
         )
     ],
     swiftLanguageModes: [.v6]
