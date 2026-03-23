@@ -152,17 +152,20 @@ final class MicroConditionEmbedder: Module, @unchecked Sendable {
 
 // MARK: - Size Embedder (Resolution)
 
-/// Resolution embedder: embeds height and width separately, then concatenates.
+/// Resolution embedder: embeds height and width separately through the SAME MLP, then concatenates.
+///
+/// Matches the original PixArt-Sigma `csize_embedder` which uses a single shared MLP
+/// applied independently to both H and W. In HuggingFace diffusers format, the shared
+/// weights are stored as `adaln_single.emb.resolution_embedder.linear_{1,2}`.
 ///
 /// Each dimension: sinusoidal(256) -> MLP(256 -> 384 -> 384)
 /// Output: [B, 768] (2 x 384)
 final class SizeEmbedder: Module, @unchecked Sendable {
-    let heightEmbedder: MicroConditionEmbedder
-    let widthEmbedder: MicroConditionEmbedder
+    /// Single shared MLP applied to both height and width independently.
+    let embedder: MicroConditionEmbedder
 
     init(frequencyDim: Int = 256, outputDimPerAxis: Int = 384) {
-        self.heightEmbedder = MicroConditionEmbedder(frequencyDim: frequencyDim, outputDim: outputDimPerAxis)
-        self.widthEmbedder = MicroConditionEmbedder(frequencyDim: frequencyDim, outputDim: outputDimPerAxis)
+        self.embedder = MicroConditionEmbedder(frequencyDim: frequencyDim, outputDim: outputDimPerAxis)
     }
 
     /// - Parameter size: [B, 2] where columns are (height, width).
@@ -170,8 +173,8 @@ final class SizeEmbedder: Module, @unchecked Sendable {
     func callAsFunction(_ size: MLXArray) -> MLXArray {
         let h = size[0..., 0]  // [B]
         let w = size[0..., 1]  // [B]
-        let hEmb = heightEmbedder(h)  // [B, 384]
-        let wEmb = widthEmbedder(w)   // [B, 384]
+        let hEmb = embedder(h)  // [B, 384]
+        let wEmb = embedder(w)  // [B, 384] — same MLP applied to width
         return concatenated([hEmb, wEmb], axis: -1)  // [B, 768]
     }
 }

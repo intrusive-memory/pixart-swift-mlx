@@ -194,11 +194,6 @@ public final class PixArtDiT: Backbone, @unchecked Sendable {
         314_572_800
     }
 
-    public var keyMapping: KeyMapping {
-        // Placeholder identity mapping — real key mapping is Sortie 3
-        { key in key }
-    }
-
     public func apply(weights: Tuberia.ModuleParameters) throws {
         self.weights = weights
         self.isLoaded = true
