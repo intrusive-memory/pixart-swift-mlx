@@ -19,15 +19,15 @@ let package = Package(
         )
     ],
     dependencies: [
-        .package(path: "../SwiftTubería"),
+        .package(url: "https://github.com/intrusive-memory/SwiftTuberia.git", branch: "development"),
         .package(url: "https://github.com/apple/swift-argument-parser", from: "1.3.0")
     ],
     targets: [
         .target(
             name: "PixArtBackbone",
             dependencies: [
-                .product(name: "Tuberia", package: "SwiftTubería"),
-                .product(name: "TuberiaCatalog", package: "SwiftTubería")
+                .product(name: "Tuberia", package: "SwiftTuberia"),
+                .product(name: "TuberiaCatalog", package: "SwiftTuberia")
             ]
         ),
         .executableTarget(
