@@ -1,6 +1,6 @@
+import Foundation
 @preconcurrency import MLX
 import MLXNN
-import Foundation
 
 // MARK: - 2D Sinusoidal Position Embeddings
 
@@ -21,37 +21,39 @@ import Foundation
 ///   - baseSize: Base resolution / patchSize for normalization.
 /// - Returns: Position embeddings of shape [1, gridH * gridW, hiddenSize].
 func get2DSinusoidalPositionEmbeddings(
-    gridH: Int,
-    gridW: Int,
-    hiddenSize: Int,
-    peInterpolation: Float,
-    baseSize: Int
+  gridH: Int,
+  gridW: Int,
+  hiddenSize: Int,
+  peInterpolation: Float,
+  baseSize: Int
 ) -> MLXArray {
-    let baseGridSize = Float(baseSize)
-    let halfDim = hiddenSize / 2
+  let baseGridSize = Float(baseSize)
+  let halfDim = hiddenSize / 2
 
-    // Compute grid coordinates normalized by base resolution and interpolation
-    let hCoords = MLXArray(0 ..< gridH).asType(.float32) / (Float(gridH) / baseGridSize) / peInterpolation
-    let wCoords = MLXArray(0 ..< gridW).asType(.float32) / (Float(gridW) / baseGridSize) / peInterpolation
+  // Compute grid coordinates normalized by base resolution and interpolation
+  let hCoords =
+    MLXArray(0..<gridH).asType(.float32) / (Float(gridH) / baseGridSize) / peInterpolation
+  let wCoords =
+    MLXArray(0..<gridW).asType(.float32) / (Float(gridW) / baseGridSize) / peInterpolation
 
-    // Compute sinusoidal embeddings for each axis (each gets halfDim / 2 sin + halfDim / 2 cos)
-    let embedH = sinusoidalEmbedding1D(positions: hCoords, dim: halfDim)  // [gridH, halfDim]
-    let embedW = sinusoidalEmbedding1D(positions: wCoords, dim: halfDim)  // [gridW, halfDim]
+  // Compute sinusoidal embeddings for each axis (each gets halfDim / 2 sin + halfDim / 2 cos)
+  let embedH = sinusoidalEmbedding1D(positions: hCoords, dim: halfDim)  // [gridH, halfDim]
+  let embedW = sinusoidalEmbedding1D(positions: wCoords, dim: halfDim)  // [gridW, halfDim]
 
-    // Create 2D grid: for each (h, w) pair, concatenate embedH[h] and embedW[w]
-    // embedH: [gridH, 1, halfDim] broadcast with embedW: [1, gridW, halfDim]
-    let embedHExpanded = embedH.expandedDimensions(axis: 1)  // [gridH, 1, halfDim]
-    let embedWExpanded = embedW.expandedDimensions(axis: 0)  // [1, gridW, halfDim]
+  // Create 2D grid: for each (h, w) pair, concatenate embedH[h] and embedW[w]
+  // embedH: [gridH, 1, halfDim] broadcast with embedW: [1, gridW, halfDim]
+  let embedHExpanded = embedH.expandedDimensions(axis: 1)  // [gridH, 1, halfDim]
+  let embedWExpanded = embedW.expandedDimensions(axis: 0)  // [1, gridW, halfDim]
 
-    // Broadcast and tile to create full grid
-    let embedHTiled = MLX.broadcast(embedHExpanded, to: [gridH, gridW, halfDim])
-    let embedWTiled = MLX.broadcast(embedWExpanded, to: [gridH, gridW, halfDim])
+  // Broadcast and tile to create full grid
+  let embedHTiled = MLX.broadcast(embedHExpanded, to: [gridH, gridW, halfDim])
+  let embedWTiled = MLX.broadcast(embedWExpanded, to: [gridH, gridW, halfDim])
 
-    // Concatenate along embedding dimension: [gridH, gridW, hiddenSize]
-    let posEmbed = concatenated([embedHTiled, embedWTiled], axis: -1)
+  // Concatenate along embedding dimension: [gridH, gridW, hiddenSize]
+  let posEmbed = concatenated([embedHTiled, embedWTiled], axis: -1)
 
-    // Flatten spatial dims and add batch dim: [1, gridH * gridW, hiddenSize]
-    return posEmbed.reshaped(1, gridH * gridW, hiddenSize)
+  // Flatten spatial dims and add batch dim: [1, gridH * gridW, hiddenSize]
+  return posEmbed.reshaped(1, gridH * gridW, hiddenSize)
 }
 
 /// Computes 1D sinusoidal embeddings for a set of positions.
@@ -64,16 +66,16 @@ func get2DSinusoidalPositionEmbeddings(
 ///   - dim: Output embedding dimension.
 /// - Returns: Embeddings of shape [N, dim].
 func sinusoidalEmbedding1D(positions: MLXArray, dim: Int) -> MLXArray {
-    let halfDim = dim / 2
-    let logBase: Float = Foundation.log(10000.0)
-    let indices = MLXArray(0 ..< halfDim).asType(.float32)
-    let freqs = MLX.exp(-logBase * indices / Float(halfDim))  // [halfDim]
+  let halfDim = dim / 2
+  let logBase: Float = Foundation.log(10000.0)
+  let indices = MLXArray(0..<halfDim).asType(.float32)
+  let freqs = MLX.exp(-logBase * indices / Float(halfDim))  // [halfDim]
 
-    // positions: [N], freqs: [halfDim] -> outer product: [N, halfDim]
-    let angles = positions.expandedDimensions(axis: -1) * freqs.expandedDimensions(axis: 0)
+  // positions: [N], freqs: [halfDim] -> outer product: [N, halfDim]
+  let angles = positions.expandedDimensions(axis: -1) * freqs.expandedDimensions(axis: 0)
 
-    // Concatenate cos and sin: [N, dim]
-    return concatenated([MLX.cos(angles), MLX.sin(angles)], axis: -1)
+  // Concatenate cos and sin: [N, dim]
+  return concatenated([MLX.cos(angles), MLX.sin(angles)], axis: -1)
 }
 
 // MARK: - Timestep Sinusoidal Embedding
@@ -89,16 +91,16 @@ func sinusoidalEmbedding1D(positions: MLXArray, dim: Int) -> MLXArray {
 ///   - dim: Embedding dimension (default 256).
 /// - Returns: Timestep embedding, shape [B, dim].
 func timestepSinusoidalEmbedding(_ timestep: MLXArray, dim: Int = 256) -> MLXArray {
-    let halfDim = dim / 2
-    let logBase: Float = Foundation.log(10000.0)
-    let indices = MLXArray(0 ..< halfDim).asType(.float32)
-    let freqs = MLX.exp(-logBase * indices / Float(halfDim))  // [halfDim]
+  let halfDim = dim / 2
+  let logBase: Float = Foundation.log(10000.0)
+  let indices = MLXArray(0..<halfDim).asType(.float32)
+  let freqs = MLX.exp(-logBase * indices / Float(halfDim))  // [halfDim]
 
-    // timestep: [B], freqs: [halfDim] -> [B, halfDim]
-    let angles = timestep.expandedDimensions(axis: -1) * freqs.expandedDimensions(axis: 0)
+  // timestep: [B], freqs: [halfDim] -> [B, halfDim]
+  let angles = timestep.expandedDimensions(axis: -1) * freqs.expandedDimensions(axis: 0)
 
-    // [B, dim]
-    return concatenated([MLX.cos(angles), MLX.sin(angles)], axis: -1)
+  // [B, dim]
+  return concatenated([MLX.cos(angles), MLX.sin(angles)], axis: -1)
 }
 
 // MARK: - Timestep MLP
@@ -107,20 +109,20 @@ func timestepSinusoidalEmbedding(_ timestep: MLXArray, dim: Int = 256) -> MLXArr
 ///
 /// Projects the sinusoidal timestep embedding into the model's hidden dimension.
 final class TimestepEmbedder: Module, @unchecked Sendable {
-    @ModuleInfo var linear1: Linear
-    @ModuleInfo var linear2: Linear
+  @ModuleInfo var linear1: Linear
+  @ModuleInfo var linear2: Linear
 
-    init(hiddenSize: Int, frequencyDim: Int = 256) {
-        self._linear1.wrappedValue = Linear(frequencyDim, hiddenSize)
-        self._linear2.wrappedValue = Linear(hiddenSize, hiddenSize)
-    }
+  init(hiddenSize: Int, frequencyDim: Int = 256) {
+    self._linear1.wrappedValue = Linear(frequencyDim, hiddenSize)
+    self._linear2.wrappedValue = Linear(hiddenSize, hiddenSize)
+  }
 
-    func callAsFunction(_ x: MLXArray) -> MLXArray {
-        var h = linear1(x)
-        h = silu(h)
-        h = linear2(h)
-        return h
-    }
+  func callAsFunction(_ x: MLXArray) -> MLXArray {
+    var h = linear1(x)
+    h = silu(h)
+    h = linear2(h)
+    return h
+  }
 }
 
 // MARK: - Micro-Condition Embedders
@@ -131,23 +133,23 @@ final class TimestepEmbedder: Module, @unchecked Sendable {
 ///
 /// Used for resolution and aspect ratio conditioning in PixArt-Sigma.
 final class MicroConditionEmbedder: Module, @unchecked Sendable {
-    @ModuleInfo var linear1: Linear
-    @ModuleInfo var linear2: Linear
-    let frequencyDim: Int
+  @ModuleInfo var linear1: Linear
+  @ModuleInfo var linear2: Linear
+  let frequencyDim: Int
 
-    init(frequencyDim: Int = 256, outputDim: Int) {
-        self.frequencyDim = frequencyDim
-        self._linear1.wrappedValue = Linear(frequencyDim, outputDim)
-        self._linear2.wrappedValue = Linear(outputDim, outputDim)
-    }
+  init(frequencyDim: Int = 256, outputDim: Int) {
+    self.frequencyDim = frequencyDim
+    self._linear1.wrappedValue = Linear(frequencyDim, outputDim)
+    self._linear2.wrappedValue = Linear(outputDim, outputDim)
+  }
 
-    func callAsFunction(_ x: MLXArray) -> MLXArray {
-        let emb = timestepSinusoidalEmbedding(x, dim: frequencyDim)
-        var h = linear1(emb)
-        h = silu(h)
-        h = linear2(h)
-        return h
-    }
+  func callAsFunction(_ x: MLXArray) -> MLXArray {
+    let emb = timestepSinusoidalEmbedding(x, dim: frequencyDim)
+    var h = linear1(emb)
+    h = silu(h)
+    h = linear2(h)
+    return h
+  }
 }
 
 // MARK: - Size Embedder (Resolution)
@@ -161,22 +163,22 @@ final class MicroConditionEmbedder: Module, @unchecked Sendable {
 /// Each dimension: sinusoidal(256) -> MLP(256 -> 384 -> 384)
 /// Output: [B, 768] (2 x 384)
 final class SizeEmbedder: Module, @unchecked Sendable {
-    /// Single shared MLP applied to both height and width independently.
-    let embedder: MicroConditionEmbedder
+  /// Single shared MLP applied to both height and width independently.
+  let embedder: MicroConditionEmbedder
 
-    init(frequencyDim: Int = 256, outputDimPerAxis: Int = 384) {
-        self.embedder = MicroConditionEmbedder(frequencyDim: frequencyDim, outputDim: outputDimPerAxis)
-    }
+  init(frequencyDim: Int = 256, outputDimPerAxis: Int = 384) {
+    self.embedder = MicroConditionEmbedder(frequencyDim: frequencyDim, outputDim: outputDimPerAxis)
+  }
 
-    /// - Parameter size: [B, 2] where columns are (height, width).
-    /// - Returns: [B, outputDimPerAxis * 2]
-    func callAsFunction(_ size: MLXArray) -> MLXArray {
-        let h = size[0..., 0]  // [B]
-        let w = size[0..., 1]  // [B]
-        let hEmb = embedder(h)  // [B, 384]
-        let wEmb = embedder(w)  // [B, 384] — same MLP applied to width
-        return concatenated([hEmb, wEmb], axis: -1)  // [B, 768]
-    }
+  /// - Parameter size: [B, 2] where columns are (height, width).
+  /// - Returns: [B, outputDimPerAxis * 2]
+  func callAsFunction(_ size: MLXArray) -> MLXArray {
+    let h = size[0..., 0]  // [B]
+    let w = size[0..., 1]  // [B]
+    let hEmb = embedder(h)  // [B, 384]
+    let wEmb = embedder(w)  // [B, 384] — same MLP applied to width
+    return concatenated([hEmb, wEmb], axis: -1)  // [B, 768]
+  }
 }
 
 // MARK: - Aspect Ratio Embedder
@@ -185,17 +187,17 @@ final class SizeEmbedder: Module, @unchecked Sendable {
 ///
 /// Output: [B, 384]
 final class AspectRatioEmbedder: Module, @unchecked Sendable {
-    let embedder: MicroConditionEmbedder
+  let embedder: MicroConditionEmbedder
 
-    init(frequencyDim: Int = 256, outputDim: Int = 384) {
-        self.embedder = MicroConditionEmbedder(frequencyDim: frequencyDim, outputDim: outputDim)
-    }
+  init(frequencyDim: Int = 256, outputDim: Int = 384) {
+    self.embedder = MicroConditionEmbedder(frequencyDim: frequencyDim, outputDim: outputDim)
+  }
 
-    /// - Parameter ar: Aspect ratio values, shape [B].
-    /// - Returns: [B, 384]
-    func callAsFunction(_ ar: MLXArray) -> MLXArray {
-        embedder(ar)
-    }
+  /// - Parameter ar: Aspect ratio values, shape [B].
+  /// - Returns: [B, 384]
+  func callAsFunction(_ ar: MLXArray) -> MLXArray {
+    embedder(ar)
+  }
 }
 
 // MARK: - Caption Projection
@@ -205,18 +207,18 @@ final class AspectRatioEmbedder: Module, @unchecked Sendable {
 /// Linear(4096, 1152) -> GELU(tanh) -> Linear(1152, 1152)
 /// Applied once before the DiT blocks.
 final class CaptionProjection: Module, @unchecked Sendable {
-    @ModuleInfo var linear1: Linear
-    @ModuleInfo var linear2: Linear
+  @ModuleInfo var linear1: Linear
+  @ModuleInfo var linear2: Linear
 
-    init(captionChannels: Int, hiddenSize: Int) {
-        self._linear1.wrappedValue = Linear(captionChannels, hiddenSize)
-        self._linear2.wrappedValue = Linear(hiddenSize, hiddenSize)
-    }
+  init(captionChannels: Int, hiddenSize: Int) {
+    self._linear1.wrappedValue = Linear(captionChannels, hiddenSize)
+    self._linear2.wrappedValue = Linear(hiddenSize, hiddenSize)
+  }
 
-    func callAsFunction(_ x: MLXArray) -> MLXArray {
-        var h = linear1(x)
-        h = geluApproximate(h)
-        h = linear2(h)
-        return h
-    }
+  func callAsFunction(_ x: MLXArray) -> MLXArray {
+    var h = linear1(x)
+    h = geluApproximate(h)
+    h = linear2(h)
+    return h
+  }
 }

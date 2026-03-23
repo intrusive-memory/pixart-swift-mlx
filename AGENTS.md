@@ -2,7 +2,9 @@
 
 This file provides comprehensive documentation for AI agents working with the pixart-swift-mlx codebase.
 
-**Status**: Pre-implementation — see [REQUIREMENTS.md](REQUIREMENTS.md) for full specification.
+**Version**: 0.1.0
+**Purpose**: Guide AI agents working on pixart-swift-mlx
+**Audience**: Claude Code, Gemini, and other AI development assistants
 
 ---
 
@@ -26,7 +28,7 @@ T5XXLEncoder (catalog) -> PixArtDiT (this repo) -> SDXLVAEDecoder (catalog) -> I
 - LoRA target layer declarations
 - Pipeline recipe assembly
 - Weight conversion scripts
-- CLI tool
+- CLI tool (`PixArtCLI`)
 
 **~400 lines of model-specific code total.**
 
@@ -44,9 +46,33 @@ T5XXLEncoder (catalog) -> PixArtDiT (this repo) -> SDXLVAEDecoder (catalog) -> I
 
 ## Build and Test
 
+This project uses a Makefile. Available targets:
+
 ```bash
-xcodebuild build -scheme pixart-swift-mlx -destination 'platform=macOS'
-xcodebuild test -scheme pixart-swift-mlx -destination 'platform=macOS'
+make resolve   # Resolve SPM dependencies
+make build     # Debug build
+make install   # Debug build + copy PixArtCLI binary to ./bin
+make release   # Release build + copy binary to ./bin
+make test      # Run unit tests
+make lint      # Format Swift sources with swift-format
+make clean     # Remove build artifacts and DerivedData
+make help      # Show all targets
 ```
 
-See [REQUIREMENTS.md](REQUIREMENTS.md) for the complete specification.
+## Critical Rules for AI Agents
+
+1. NEVER commit directly to `main` — use `development` branch
+2. ONLY support iOS 26.0+ and macOS 26.0+ (NEVER add code for older platforms)
+3. ALWAYS run `make lint` before committing
+4. ALWAYS read files before editing
+5. NEVER create files unless necessary
+6. Follow agent-specific instructions — see [CLAUDE.md](CLAUDE.md) or [GEMINI.md](GEMINI.md)
+
+## Documentation Index
+
+- [AGENTS.md](AGENTS.md) — Universal agent documentation (this file)
+- [CLAUDE.md](CLAUDE.md) — Claude-specific instructions
+- [GEMINI.md](GEMINI.md) — Gemini-specific instructions
+- [REQUIREMENTS.md](REQUIREMENTS.md) — Full specification
+- [ARCHITECTURE.md](ARCHITECTURE.md) — Detailed architecture notes
+- [README.md](README.md) — User-facing documentation

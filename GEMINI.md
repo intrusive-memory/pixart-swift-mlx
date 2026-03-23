@@ -1,9 +1,22 @@
-# GEMINI.md
+# Gemini-Specific Agent Instructions
 
-See [AGENTS.md](AGENTS.md) for full project documentation.
+**⚠️ Read [AGENTS.md](AGENTS.md) first** for universal project documentation.
 
-**pixart-swift-mlx** — PixArt-Sigma model plugin for SwiftTuberia.
+This file contains instructions specific to Google Gemini agents.
 
-Provides the PixArt DiT backbone, weight mapping, and pipeline recipe. ~400 lines of model-specific code.
+## Build Commands
 
-Platforms: iOS 26.0+, macOS 26.0+ only.
+Use standard Makefile targets for all operations:
+
+```bash
+make build     # Debug build
+make test      # Run unit tests
+make lint      # Format Swift sources
+make clean     # Clean build artifacts
+```
+
+## Gemini-Specific Critical Rules
+
+1. Use Makefile targets (no MCP access)
+2. ONLY supports iOS 26.0+ and macOS 26.0+
+3. See [AGENTS.md](AGENTS.md) for universal rules
