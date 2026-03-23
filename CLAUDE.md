@@ -1,25 +1,26 @@
-# CLAUDE.md
+# Claude-Specific Agent Instructions
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+**⚠️ Read [AGENTS.md](AGENTS.md) first** for universal project documentation.
 
-For detailed project documentation, see **[AGENTS.md](AGENTS.md)**.
+This file contains instructions specific to Claude Code agents.
 
-## Quick Reference
+## Build Preferences
 
-**Project**: pixart-swift-mlx - PixArt-Sigma model plugin for SwiftTuberia
+- NEVER use `swift build` or `swift test` — use `make` targets or `xcodebuild`
+- Use `make build`, `make test`, `make lint` for standard operations
+- See [AGENTS.md](AGENTS.md) for full list of Makefile targets
 
-**Platforms**: iOS 26.0+, macOS 26.0+
+## Key Components
 
-**Key Components**:
 - PixArt-Sigma DiT backbone (Backbone protocol conformance)
 - Weight key mapping (PyTorch -> MLX safetensors)
 - Pipeline recipe (T5 + DPM + PixArtDiT + SDXL VAE + ImageRenderer)
 - Acervo component descriptors
-- CLI tool for image generation
+- CLI tool for image generation (`PixArtCLI`)
 
-**Important Notes**:
-- ONLY supports iOS 26.0+ and macOS 26.0+ (NEVER add code for older platforms)
-- ~400 lines of model-specific code — everything else comes from SwiftTuberia
-- ~2 GB total (int4), iPad-viable
-- See [AGENTS.md](AGENTS.md) for complete documentation
-- See [REQUIREMENTS.md](REQUIREMENTS.md) for full specification
+## Claude-Specific Critical Rules
+
+1. NEVER use `swift build` or `swift test` — always use Makefile targets
+2. ONLY supports iOS 26.0+ and macOS 26.0+ (NEVER add code for older platforms)
+3. ALWAYS run `make lint` before committing
+4. See [AGENTS.md](AGENTS.md) for universal rules

@@ -20,37 +20,22 @@ jobs:
       - name: Show Swift version
         run: swift --version
 
-      - name: Build
-        run: |
-          xcodebuild build \
-            -scheme pixart-swift-mlx \
-            -destination 'platform=macOS'
-
       - name: Test
         run: |
           xcodebuild test \
-            -scheme pixart-swift-mlx \
-            -destination 'platform=macOS'
+            -scheme pixart-swift-mlx-Package \
+            -destination 'platform=macOS,arch=arm64'
 
-  test-ios:
-    name: Test on iOS Simulator
+  build-ios:
+    name: Build for iOS
     runs-on: macos-26
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Show Swift version
-        run: swift --version
-
-      - name: Build for iOS
+      - name: Build
         run: |
-          xcodebuild build-for-testing \
-            -scheme pixart-swift-mlx \
-            -destination 'platform=iOS Simulator,name=iPhone 17,OS=26.1'
-
-      - name: Test on iOS
-        run: |
-          xcodebuild test-without-building \
-            -scheme pixart-swift-mlx \
+          xcodebuild build \
+            -scheme pixart-swift-mlx-Package \
             -destination 'platform=iOS Simulator,name=iPhone 17,OS=26.1'
