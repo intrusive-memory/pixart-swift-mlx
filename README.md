@@ -28,7 +28,7 @@ Add to your `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/intrusive-memory/pixart-swift-mlx.git", from: "0.1.0")
+    .package(url: "https://github.com/intrusive-memory/pixart-swift-mlx.git", from: "0.2.0")
 ]
 ```
 
