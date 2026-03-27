@@ -194,6 +194,8 @@ public final class PixArtDiT: Backbone, @unchecked Sendable {
     314_572_800
   }
 
+  public var currentWeights: Tuberia.ModuleParameters? { weights }
+
   public func apply(weights: Tuberia.ModuleParameters) throws {
     self.weights = weights
     self.isLoaded = true
