@@ -2,7 +2,7 @@
 
 This file provides comprehensive documentation for AI agents working with the pixart-swift-mlx codebase.
 
-**Version**: 0.2.0
+**Version**: 0.3.0
 **Purpose**: Guide AI agents working on pixart-swift-mlx
 **Audience**: Claude Code, Gemini, and other AI development assistants
 
@@ -53,10 +53,12 @@ make resolve   # Resolve SPM dependencies
 make build     # Debug build
 make install   # Debug build + copy PixArtCLI binary to ./bin
 make release   # Release build + copy binary to ./bin
-make test      # Run unit tests
-make lint      # Format Swift sources with swift-format
-make clean     # Remove build artifacts and DerivedData
-make help      # Show all targets
+make test         # Run Swift unit tests
+make test-python  # Run Python conversion script tests
+make test-all     # Run all tests (Swift + Python)
+make lint         # Format Swift sources with swift-format
+make clean        # Remove build artifacts and DerivedData
+make help         # Show all targets
 ```
 
 ## Critical Rules for AI Agents
