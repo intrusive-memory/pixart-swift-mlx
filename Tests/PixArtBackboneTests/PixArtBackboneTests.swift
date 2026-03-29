@@ -69,6 +69,6 @@ struct VersionTests {
   @Test("Version string is set")
   func versionExists() {
     #expect(!version.isEmpty)
-    #expect(version == "0.2.0")
+    #expect(version == "0.3.0")
   }
 }
