@@ -6,3 +6,8 @@ Package.resolved
 xcuserdata/
 DerivedData/
 .DS_Store
+__pycache__/
+*.pyc
+.venv/
+converted/
+bin/

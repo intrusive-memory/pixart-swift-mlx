@@ -1,0 +1,12 @@
+# Weight conversion dependencies for pixart-swift-mlx
+# Pin diffusers to prevent key name changes from breaking WeightMapping.swift
+torch>=2.1.0
+transformers>=4.36.0,<5.0.0
+diffusers==0.32.2
+safetensors>=0.4.0
+mlx>=0.31.0
+numpy>=1.24.0
+huggingface_hub>=0.20.0
+Pillow>=10.0.0
+sentencepiece>=0.2.0
+protobuf>=4.0.0
