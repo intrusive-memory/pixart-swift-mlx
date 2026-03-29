@@ -1,4 +1,4 @@
-.PHONY: all resolve build install release test lint clean help
+.PHONY: all resolve build install release test test-python test-all lint clean help
 
 SCHEME = pixart-swift-mlx
 TEST_SCHEME = pixart-swift-mlx-Package
@@ -55,8 +55,14 @@ release: resolve
 	fi
 
 test:
-	@echo "Running tests..."
+	@echo "Running Swift tests..."
 	xcodebuild test -scheme $(TEST_SCHEME) -destination '$(DESTINATION)'
+
+test-python:
+	@echo "Running Python conversion script tests..."
+	python3 -m unittest scripts.test_conversion -v
+
+test-all: test test-python
 
 lint:
 	@echo "Formatting Swift sources..."
@@ -75,7 +81,9 @@ help:
 	@echo "  build     Debug build"
 	@echo "  install   Debug build + copy binary to $(BIN_DIR) (default)"
 	@echo "  release   Release build + copy binary to $(BIN_DIR)"
-	@echo "  test      Run unit tests"
+	@echo "  test         Run Swift unit tests"
+	@echo "  test-python  Run Python conversion script tests"
+	@echo "  test-all     Run all tests (Swift + Python)"
 	@echo "  lint      Format Swift sources with swift-format"
 	@echo "  clean     Remove build artifacts and DerivedData"
 	@echo "  help      Show this help"
