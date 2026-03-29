@@ -4,11 +4,7 @@ import ArgumentParser
 struct PixArtCLI: ParsableCommand {
   static let configuration = CommandConfiguration(
     commandName: "pixart",
-    abstract: "PixArt-Sigma image generation CLI"
+    abstract: "PixArt-Sigma image generation CLI",
+    subcommands: [GenerateCommand.self, DownloadCommand.self, InfoCommand.self]
   )
-
-  func run() throws {
-    // Placeholder — implementation in subsequent sorties
-    print("PixArtCLI — placeholder")
-  }
 }
