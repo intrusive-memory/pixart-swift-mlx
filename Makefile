@@ -1,7 +1,6 @@
 .PHONY: all resolve build install release test test-python test-all lint clean help
 
-SCHEME = pixart-swift-mlx
-TEST_SCHEME = pixart-swift-mlx-Package
+SCHEME = pixart-swift-mlx-Package
 BINARY = PixArtCLI
 BIN_DIR = ./bin
 DERIVED_DATA = $(HOME)/Library/Developer/Xcode/DerivedData
@@ -56,7 +55,7 @@ release: resolve
 
 test:
 	@echo "Running Swift tests..."
-	xcodebuild test -scheme $(TEST_SCHEME) -destination '$(DESTINATION)'
+	xcodebuild test -scheme $(SCHEME) -destination '$(DESTINATION)'
 
 test-python:
 	@echo "Running Python conversion script tests..."
