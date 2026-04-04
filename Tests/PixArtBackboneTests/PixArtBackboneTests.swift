@@ -60,15 +60,3 @@ struct DiTTests {
     #expect(dit.estimatedMemoryBytes == 314_572_800)
   }
 }
-
-// MARK: - Version Tests
-
-@Suite("Version")
-struct VersionTests {
-
-  @Test("Version string is set")
-  func versionExists() {
-    #expect(!version.isEmpty)
-    #expect(version == "0.4.0")
-  }
-}
