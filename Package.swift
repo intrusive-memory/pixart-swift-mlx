@@ -19,7 +19,7 @@ let package = Package(
     ),
   ],
   dependencies: [
-    .package(url: "https://github.com/intrusive-memory/SwiftTuberia.git", from: "0.2.0"),
+    .package(url: "https://github.com/intrusive-memory/SwiftTuberia.git", from: "0.2.7"),
     .package(url: "https://github.com/apple/swift-argument-parser", from: "1.3.0"),
   ],
   targets: [
