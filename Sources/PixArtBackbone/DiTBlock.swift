@@ -28,7 +28,9 @@ final class GEGLUFFN: Module, @unchecked Sendable {
     let value = chunks[1]  // [B, T, ffnDim]
 
     // GEGLU: GELU(tanh)(gate) * value
-    let activated = geluApproximate(gate) * value
+    // geluApproximate uses compile(shapeless:true) which can return 0-D tensors under
+    // memory pressure. Replace with direct gelu_new (tanh approximation) math.
+    let activated = gate * 0.5 * (1.0 + MLX.tanh(0.7978845608 * (gate + 0.044715 * gate * gate * gate))) * value
 
     // Project back: [B, T, hiddenSize]
     return fc2(activated)
