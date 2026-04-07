@@ -23,7 +23,7 @@ import Tuberia
 ///         }
 /// outlet: MLXArray [B, H/8, W/8, 4]  (variance channels discarded)
 /// ```
-public final class PixArtDiT: Backbone, @unchecked Sendable {
+public final class PixArtDiT: Module, Backbone, @unchecked Sendable {
   public typealias Configuration = PixArtDiTConfiguration
 
   private let configuration: Configuration
@@ -102,6 +102,7 @@ public final class PixArtDiT: Backbone, @unchecked Sendable {
       outChannels: configuration.outChannels
     )
 
+    super.init()
     assert(blocks.count == 28, "PixArt-Sigma XL must have exactly 28 DiT blocks")
   }
 
@@ -166,7 +167,9 @@ public final class PixArtDiT: Backbone, @unchecked Sendable {
     t = t + microCond
 
     // Stage 4: t_block: SiLU -> Linear(1152, 6*1152) = [B, 6912]
-    let tBlock = tBlockLinear(silu(t))
+    // silu uses compile(shapeless:true) which can return 0-D tensors under memory pressure.
+    // Replace with direct math: silu(x) = x * sigmoid(x)
+    let tBlock = tBlockLinear(t * MLX.sigmoid(t))
 
     // Save raw timestep embedding for final layer (before t_block)
     let tRaw = t  // [B, 1152]
@@ -197,6 +200,8 @@ public final class PixArtDiT: Backbone, @unchecked Sendable {
   public var currentWeights: Tuberia.ModuleParameters? { weights }
 
   public func apply(weights: Tuberia.ModuleParameters) throws {
+    let mlxParams = MLXNN.ModuleParameters.unflattened(weights.parameters)
+    self.update(parameters: mlxParams)
     self.weights = weights
     self.isLoaded = true
   }

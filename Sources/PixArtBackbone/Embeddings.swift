@@ -119,7 +119,9 @@ final class TimestepEmbedder: Module, @unchecked Sendable {
 
   func callAsFunction(_ x: MLXArray) -> MLXArray {
     var h = linear1(x)
-    h = silu(h)
+    // silu uses compile(shapeless:true) which can return 0-D tensors under memory pressure.
+    // Replace with direct math: silu(x) = x * sigmoid(x)
+    h = h * MLX.sigmoid(h)
     h = linear2(h)
     return h
   }
@@ -146,7 +148,9 @@ final class MicroConditionEmbedder: Module, @unchecked Sendable {
   func callAsFunction(_ x: MLXArray) -> MLXArray {
     let emb = timestepSinusoidalEmbedding(x, dim: frequencyDim)
     var h = linear1(emb)
-    h = silu(h)
+    // silu uses compile(shapeless:true) which can return 0-D tensors under memory pressure.
+    // Replace with direct math: silu(x) = x * sigmoid(x)
+    h = h * MLX.sigmoid(h)
     h = linear2(h)
     return h
   }
@@ -217,7 +221,9 @@ final class CaptionProjection: Module, @unchecked Sendable {
 
   func callAsFunction(_ x: MLXArray) -> MLXArray {
     var h = linear1(x)
-    h = geluApproximate(h)
+    // geluApproximate uses compile(shapeless:true) which can return 0-D tensors under
+    // memory pressure. Replace with direct gelu_new (tanh approximation) math.
+    h = h * 0.5 * (1.0 + MLX.tanh(0.7978845608 * (h + 0.044715 * h * h * h)))
     h = linear2(h)
     return h
   }
