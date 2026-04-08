@@ -1,695 +1,341 @@
 ---
-feature_name: "pixart-swift-mlx — PixArt Model Plugin"
-iteration: 1
+feature_name: "OPERATION SIGMA FOUNDRY"
+iteration: 2
 wave: 3
 repository: pixart-swift-mlx
-status: refined
-depends_on: ["SwiftAcervo v2", "SwiftTubería Waves 1-2"]
+status: in_progress
+source_requirements: REQUIREMENTS.md
+starting_point_commit: 9ea71031e6f836089c54f64c26313fb969b2bd81
+mission_branch: mission/sigma-foundry/2
 ---
 
-# Execution Plan: pixart-swift-mlx
+# EXECUTION_PLAN.md — pixart-swift-mlx
 
-> **Terminology**: A *mission* is the definable scope of work — the whole campaign. A *sortie* is an atomic, testable unit of work executed by a single autonomous AI agent in one dispatch. A sortie has a defined objective, machine-verifiable entry/exit criteria, and bounded scope (fits within a single agent context window). We avoid agile/waterfall terminology (sprint, iteration, phase) because those map to *time*. Missions and sorties map to *agentic work cycles*, which have no inherent time dimension.
+## Terminology
 
-**Goal**: Deliver the PixArt-Sigma DiT backbone as a SwiftTubería model plugin. This package provides ~400 lines of model-specific code — the DiT transformer, weight key mapping, pipeline recipe, Acervo descriptors, and a CLI tool. All shared infrastructure (weight loading, scheduling, VAE decoding, image rendering, memory management) comes from SwiftTubería.
+> **Mission** — A definable, testable scope of work. Defines scope, acceptance criteria, and dependency structure.
 
-**Upstream blockers**: SwiftTubería must ship its `Backbone`, `WeightedSegment`, `PipelineRecipe`, and catalog components (T5XXLEncoder, SDXLVAEDecoder, DPMSolverScheduler, ImageRenderer) before Sorties 2-5 can compile against real protocols. Sortie 1 (package structure) can proceed with placeholder targets once SwiftTubería's package URL is known.
+> **Sortie** — An atomic, testable unit of work executed by a single autonomous AI agent in one dispatch. One aircraft, one mission, one return.
 
----
+> **Work Unit** — A grouping of sorties (package, component, phase).
 
-## Sortie 0: Reconnaissance (COMPLETED)
-
-### Objective
-Map the current codebase state, understand the PyTorch reference implementation, and identify all architectural details needed for implementation.
-
-### Current Codebase State
-- **Package.swift**: Exists but defines `PixArtMLX` library with only `SwiftAcervo` dependency. Needs restructuring per REQUIREMENTS.md (rename to `PixArtBackbone`, add `PixArtCLI` executable, depend on SwiftTubería instead of SwiftAcervo directly).
-- **Sources/PixArtMLX/PixArtMLX.swift**: Single placeholder file with one comment line. No implementation.
-- **Tests/PixArtMLXTests/PixArtMLXTests.swift**: Single placeholder test. No real tests.
-- **docs/incomplete/ARCHITECTURE_STANDALONE.md**: Comprehensive implementation reference covering all tensor shapes, weight key mappings (PixArt DiT, T5-XXL, SDXL VAE), MLX idioms, scheduler math, and quantization format. Still valid as the primary implementation guide even though the "standalone" library approach was superseded by the plugin architecture.
-- **docs/incomplete/REQUIREMENTS_STANDALONE.md**: Superseded by top-level REQUIREMENTS.md. Retained for historical context.
-- **No scripts/ directory**: Weight conversion scripts (P7) must be created from scratch.
-- **CI**: GitHub Actions workflow exists at `.github/workflows/tests.yml` — builds and tests on macOS 26 and iOS Simulator (iPhone 17, OS 26.1). Currently runs against the placeholder test.
-
-### Key Reference Documents
-- `/Users/stovak/Projects/pixart-swift-mlx/REQUIREMENTS.md` — P1-P11 specification (source of truth)
-- `/Users/stovak/Projects/pixart-swift-mlx/ARCHITECTURE.md` — Ecosystem interface reference (protocol contracts, recipe, data flow)
-- `/Users/stovak/Projects/pixart-swift-mlx/docs/incomplete/ARCHITECTURE_STANDALONE.md` — Internal architecture detail (tensor shapes, weight mappings, MLX idioms, scheduler math)
-- PixArt-Sigma paper: arXiv:2403.04692
-- PyTorch reference: `PixArt-alpha/PixArt-sigma` on GitHub
-- HuggingFace diffusers: `PixArtSigmaPipeline`
-
-### Architecture Summary (from reconnaissance)
-- **28 DiT blocks**, each: Self-Attention -> Cross-Attention -> FFN
-- **AdaLN-Single**: One global `t_block` MLP + per-block learned `scale_shift_table` (6 x 1152)
-- **Hidden dim 1152**, 16 heads, head dim 72, patch size 2
-- **8-channel output** (4 noise + 4 variance; variance discarded at inference)
-- **2D sinusoidal position embeddings** recomputed per forward pass (variable resolution)
-- **Micro-conditioning**: resolution + aspect ratio embeddings concatenated with timestep
-- **Cross-attention receives NO AdaLN modulation**
-- **QK normalization enabled** in self-attention
-- **Caption projection**: Linear(4096, 1152) -> GELU(tanh) -> Linear(1152, 1152) before blocks
-- **Conv2d weights**: PyTorch [O,I,kH,kW] -> MLX [O,kH,kW,I] transposition required
-
-### Exit Criteria
-- [x] All architecture docs read and understood
-- [x] Current codebase state documented
-- [x] Gap analysis complete (placeholder code vs. REQUIREMENTS.md)
-- [x] Execution plan written
-
-### Notes
-The `docs/incomplete/ARCHITECTURE_STANDALONE.md` errata section (A7) documents five corrections to the standalone REQUIREMENTS that are already reflected in the top-level REQUIREMENTS.md. Confirm these during implementation: linear beta schedule (not shifted cosine), max 120 tokens (not 512), head dim 72 (not 64), 8-channel output, GELU(tanh) activation.
+We deliberately avoid agile/waterfall terminology (sprint, iteration, phase) because those map to **time**. Missions and sorties map to **agentic work cycles**, which have no inherent time dimension.
 
 ---
 
-## Sortie 1: Package Structure (P1)
+**Goal**: Deliver the PixArt-Sigma DiT backbone as a SwiftTubería model plugin. This package provides the DiT transformer, weight key mapping, pipeline recipe, Acervo descriptors, and a CLI tool. All shared infrastructure (weight loading, scheduling, VAE decoding, image rendering, memory management) comes from SwiftTubería.
 
-**Priority**: 17.0 — Foundation sortie; all subsequent sorties depend on this. Blocks 8 downstream sorties transitively.
-
-### Objective
-Restructure Package.swift to define the correct products, targets, and dependencies per REQUIREMENTS.md P1. Rename the library from `PixArtMLX` to `PixArtBackbone`, add `PixArtCLI` executable target, and switch the primary dependency from SwiftAcervo to SwiftTubería.
-
-### Entry Criteria
-- Sortie 0 complete (reconnaissance documented)
-- SwiftTubería package URL known (GitHub repo under intrusive-memory org)
-
-### Files
-| File | Action | Description |
-|------|--------|-------------|
-| `Package.swift` | **Rewrite** | Two products: `PixArtBackbone` library, `PixArtCLI` executable. Dependencies: SwiftTubería (from: "0.1.0"), swift-argument-parser (from: "1.3.0"). Platforms: `.macOS(.v26), .iOS(.v26)`. Swift language mode: `.v6`. |
-| `Sources/PixArtMLX/` | **Rename** to `Sources/PixArtBackbone/` | Source target directory rename. |
-| `Sources/PixArtCLI/` | **Create** | New directory with `PixArtCLI.swift` entry point (placeholder `@main` struct). |
-| `Tests/PixArtMLXTests/` | **Rename** to `Tests/PixArtBackboneTests/` | Test target directory rename. |
-| `.github/workflows/tests.yml` | **Update** | Scheme name changes from `pixart-swift-mlx` to match new package structure. Verify xcodebuild discovers the right scheme. |
-
-### Dependencies
-- SwiftTubería package URL must be known (GitHub repo under intrusive-memory org).
-- SwiftAcervo becomes a transitive dependency via SwiftTubería — no longer listed directly.
-
-### Target Layout
-```swift
-products: [
-    .library(name: "PixArtBackbone", targets: ["PixArtBackbone"]),
-    .executable(name: "PixArtCLI", targets: ["PixArtCLI"]),
-]
-targets: [
-    .target(name: "PixArtBackbone",
-            dependencies: [.product(name: "Tubería", package: "SwiftTubería"),
-                           .product(name: "TuberíaCatalog", package: "SwiftTubería")]),
-    .executableTarget(name: "PixArtCLI",
-                      dependencies: ["PixArtBackbone",
-                                     .product(name: "ArgumentParser", package: "swift-argument-parser")]),
-    .testTarget(name: "PixArtBackboneTests",
-                dependencies: ["PixArtBackbone"]),
-]
-```
-
-### Exit Criteria
-- [ ] `xcodebuild build -scheme PixArtBackbone -destination 'platform=macOS'` succeeds (with placeholder source)
-- [ ] `xcodebuild build -scheme PixArtCLI -destination 'platform=macOS'` succeeds (with placeholder `@main`)
-- [ ] `xcodebuild test -scheme PixArtBackbone -destination 'platform=macOS'` runs placeholder test
-- [ ] CI workflow updated: `.github/workflows/tests.yml` references correct scheme names
-- [ ] `Sources/PixArtBackbone/` directory exists and contains at least one `.swift` file
-- [ ] `Sources/PixArtCLI/PixArtCLI.swift` exists with `@main` struct
-- [ ] `Tests/PixArtBackboneTests/` directory exists with at least one test file
-
-### Notes
-- The product name in REQUIREMENTS.md is `PixArtBackbone` (not `PixArtMLX` or `PixArtCore`). SwiftVinetas will `import PixArtBackbone`.
-- SwiftTubería may not yet exist at time of writing — if so, use a branch dependency until a tagged release is available.
-- The `PixArtCLI` executable target uses `.executableTarget` (not `.target`), and requires `@main` attribute on the entry point struct.
+**⚠️ Execution context**: All source files, tests, scripts, and CI workflow described in this plan already exist (see Open Questions §1). Every sortie is scoped as **verify against spec; fix any gaps** — not build from scratch.
 
 ---
 
-## Sortie 2: PixArt DiT Backbone (P2)
+## Work Units
 
-**Priority**: 15.5 — Core implementation; blocks weight mapping, recipe, descriptors, CLI, and tests. Highest-complexity sortie. Assign to opus.
+| Work Unit | Directory | Sorties | Layer | Dependencies |
+|-----------|-----------|---------|-------|--------------|
+| PixArt Swift Package | `.` | 7 | 1 | none |
+| Weight Conversion Scripts | `scripts/` | 1 | 2 | WU1-Sortie 3 complete |
 
-### Objective
-Implement the PixArt-Sigma DiT transformer backbone conforming to SwiftTubería's `Backbone` and `WeightedSegment` protocols. This is the single substantial piece of new code (~400 lines).
+**iOS testing is out of scope** for this iteration. The `build-ios` CI job should be removed and no iOS tests added. The `platforms: [.macOS(.v26), .iOS(.v26)]` declaration in Package.swift is kept as-is.
 
-### Entry Criteria
-- Sortie 1 complete (`PixArtBackbone` target compiles with placeholder source)
-- SwiftTubería `Backbone` and `WeightedSegment` protocols available (from SwiftTubería dependency)
-
-### Files
-| File | Action | Description |
-|------|--------|-------------|
-| `Sources/PixArtBackbone/PixArtDiTConfiguration.swift` | **Create** | Configuration struct: hiddenSize (1152), numHeads (16), headDim (72), depth (28), patchSize (2), inChannels (4), outChannels (8), mlpRatio (4.0), captionChannels (4096), maxTextLength (120). Aspect ratio bucket table. |
-| `Sources/PixArtBackbone/PixArtDiT.swift` | **Create** | Top-level backbone: patch embedding, caption projection, timestep conditioning pipeline (sinusoidal + MLP + micro-conditions), t_block, 28 DiT blocks, final layer, unpatchify. Conforms to `Backbone` and `WeightedSegment`. |
-| `Sources/PixArtBackbone/DiTBlock.swift` | **Create** | Single DiT block: norm1, self-attention, cross-attention, norm2, FFN, scale_shift_table. AdaLN-Zero modulation. |
-| `Sources/PixArtBackbone/Attention.swift` | **Create** | Self-attention (with QK norm) and cross-attention modules. Multi-head reshape, `MLXFast.scaledDotProductAttention`. |
-| `Sources/PixArtBackbone/Embeddings.swift` | **Create** | 2D sinusoidal position embeddings (dynamic recomputation), timestep sinusoidal embedding, micro-condition embedders (resolution, aspect ratio). |
-| `Sources/PixArtBackbone/FinalLayer.swift` | **Create** | Final AdaLN (2-param: shift+scale, no gate), linear projection, unpatchify to spatial. |
-
-### Dependencies
-- SwiftTubería `Backbone` protocol (inlet: `BackboneInput`, outlet: `MLXArray`)
-- SwiftTubería `WeightedSegment` protocol (keyMapping, tensorTransform, estimatedMemoryBytes)
-- MLX via SwiftTubería (transitive: mlx-swift)
-
-### Shape Contracts
-```
-inlet:  BackboneInput {
-            latents:          MLXArray [B, H/8, W/8, 4]
-            conditioning:     MLXArray [B, 120, 4096]
-            conditioningMask: MLXArray [B, 120]
-            timestep:         MLXArray [B]
-        }
-outlet: MLXArray [B, H/8, W/8, 4]  (variance channels discarded)
-```
-
-Shape contract properties:
-- `expectedConditioningDim: 4096`
-- `outputLatentChannels: 4`
-- `expectedMaxSequenceLength: 120`
-
-### Implementation Details (from ARCHITECTURE_STANDALONE.md)
-1. **Patch embedding**: Conv2d(4, 1152, kernel=2, stride=2) -> flatten to [B, T, 1152]. Add 2D sinusoidal pos embeddings.
-2. **Caption projection**: Linear(4096, 1152) -> GELU(tanh) -> Linear(1152, 1152). Applied once before blocks.
-3. **Timestep pipeline**: sinusoidal(256) -> MLP(256->1152) -> add micro-conditions(resolution 2x384 + AR 384 = 1152) -> t_block: SiLU -> Linear(1152, 6*1152) = [B, 6912].
-4. **Per block**: Unpack 6 modulation params from (scale_shift_table + t). Self-attn with AdaLN. Cross-attn (no modulation). FFN with AdaLN.
-5. **Final layer**: AdaLN(2-param) + Linear(1152, 32) + unpatchify to [B, H/8, W/8, 8]. Discard last 4 channels.
-6. **All modules**: `@unchecked Sendable`, `@ModuleInfo` on quantizable Linear layers.
-
-### Exit Criteria
-- [ ] `PixArtDiT` type exists and conforms to `Backbone` protocol
-- [ ] `PixArtDiT` type conforms to `WeightedSegment` protocol
-- [ ] `xcodebuild build -scheme PixArtBackbone -destination 'platform=macOS'` succeeds with all 6 source files
-- [ ] `PixArtDiTConfiguration` struct has all required properties: hiddenSize=1152, numHeads=16, headDim=72, depth=28, patchSize=2, inChannels=4, outChannels=8, mlpRatio=4.0, captionChannels=4096, maxTextLength=120
-- [ ] `expectedConditioningDim` returns 4096, `outputLatentChannels` returns 4, `expectedMaxSequenceLength` returns 120
-- [ ] `DiTBlock` count is exactly 28 (verifiable via `blocks.count == 28` in init)
-- [ ] `t2i_modulate` helper function defined and used by both `DiTBlock` and `FinalLayer`
-- [ ] GEGLU FFN implementation: fc1 projects to 2*4608, splits for gate*value, uses GELU(tanh)
-
-### Notes
-- The `t2i_modulate(x, shift, scale) = x * (1 + scale) + shift` function appears in multiple places — define once and reuse.
-- Cross-attention receives NO timestep modulation (no shift/scale/gate). This is a key difference from self-attention.
-- The FFN uses GELU(tanh) approximation, specifically GEGLU gating: fc1 projects to 2*4608 and splits for gate*value.
-- QK normalization is enabled in self-attention (LayerNorm on q and k after reshape).
-- `pe_interpolation = 2` for PixArt-Sigma XL.
+**Note**: Work Unit 2 (Sortie 8) does not wait for all of Work Unit 1. It unlocks as soon as Sortie 3 (key mapping) completes — the key names defined there are the sole Swift-side dependency for the Python scripts.
 
 ---
 
-## Sortie 3: Weight Key Mapping (P3)
+## Work Unit 1: PixArt Swift Package
 
-**Priority**: 13.0 — Blocks conversion scripts and LoRA verification. Foundation for weight loading.
+### Sortie 1: Package Structure (P1)
 
-### Objective
-Implement the ~200 key-pair mapping from HuggingFace diffusers format to MLX module paths, plus Conv2d weight transposition.
+**Priority**: 24.75 — Highest dependency depth (blocks all remaining sorties); establishes build system and platform constraints reused by every subsequent sortie.
 
-### Entry Criteria
-- Sortie 2 complete (MLX module paths are known from the implemented backbone)
-- SwiftTubería `KeyMapping` and `TensorTransform` types available
+**Entry criteria**:
+- [ ] First sortie — no prerequisites
 
-### Files
-| File | Action | Description |
-|------|--------|-------------|
-| `Sources/PixArtBackbone/WeightMapping.swift` | **Create** | `keyMapping: KeyMapping` closure implementation. ~14 global mappings + 28 blocks x ~7 per-block mapping groups. Conv2d tensor transform. |
+**Tasks** (verify existing files meet spec; fix any discrepancies):
+1. Verify `Package.swift`: two products (`PixArtBackbone` library, `PixArtCLI` executable); dependencies SwiftTubería (≥0.2.8) and swift-argument-parser (≥1.3.0); `PixArtBackbone` target links `Tuberia` + `TuberiaCatalog`; `PixArtCLI` links `PixArtBackbone` + `ArgumentParser`
+2. Verify platforms: `[.macOS(.v26), .iOS(.v26)]` present and Swift language mode `.v6`
+3. Verify `Sources/PixArtBackbone/` contains at least one `.swift` source file
+4. Verify `Sources/PixArtCLI/PixArtCLI.swift` exists and contains `@main`
+5. Verify `Tests/PixArtBackboneTests/` contains at least one test file using Swift Testing (`@Suite` / `@Test`)
+6. Run `make build` and `make test` to confirm package compiles and placeholder tests pass
 
-### Dependencies
-- SwiftTubería `KeyMapping` type (closure: `(String) -> String?`)
-- SwiftTubería `TensorTransform` type (closure: `(String, MLXArray) -> MLXArray`)
-- Sortie 2 complete (module paths must match the actual MLX module structure)
-
-### Key Mapping Categories (from ARCHITECTURE_STANDALONE.md A6.1)
-
-**Global keys (~14 pairs)**:
-- Patch embedding: `pos_embed.proj.{weight,bias}`
-- Caption projection: `caption_projection.linear_{1,2}.{weight,bias}`
-- Timestep embedder: `adaln_single.emb.timestep_embedder.linear_{1,2}.{weight,bias}`
-- Resolution embedder: `adaln_single.emb.resolution_embedder.linear_{1,2}.{weight,bias}`
-- Aspect ratio embedder: `adaln_single.emb.aspect_ratio_embedder.linear_{1,2}.{weight,bias}`
-- t_block: `adaln_single.linear.{weight,bias}`
-- Final layer: `proj_out.{weight,bias}`, `scale_shift_table`
-- Discarded keys: `pos_embed` (recomputed), `y_embedder.y_embedding`
-
-**Per-block keys (28 blocks, ~7 groups each)**:
-- `scale_shift_table`: direct rename
-- Self-attention Q/K/V: diffusers stores separate `attn1.to_{q,k,v}` — map to module paths
-- Self-attention output: `attn1.to_out.0` -> output projection
-- QK norms: `attn1.q_norm`, `attn1.k_norm`
-- Cross-attention Q: `attn2.to_q`
-- Cross-attention K/V: `attn2.to_{k,v}`
-- Cross-attention output: `attn2.to_out.0`
-- FFN: `ff.net.0.proj` (GEGLU), `ff.net.2` (output)
-
-**Tensor transform**: Conv2d weights from `[O, I, kH, kW]` -> `[O, kH, kW, I]` via `transpose(0, 2, 3, 1)`. Applied to patch embedding conv weight.
-
-### Exit Criteria
-- [ ] `WeightMapping.swift` file exists in `Sources/PixArtBackbone/`
-- [ ] `keyMapping` closure handles all ~14 global key pairs (patch embed, caption projection, timestep/resolution/AR embedders, t_block, final layer)
-- [ ] `keyMapping` closure handles all 28 blocks with ~7 mapping groups each (scale_shift_table, self-attn Q/K/V/out, QK norms, cross-attn Q/K/V/out, FFN)
-- [ ] `tensorTransform` applies `transpose(0, 2, 3, 1)` to Conv2d patch embedding weight key
-- [ ] Discarded keys (`pos_embed`, `y_embedder.y_embedding`) return `nil` from `keyMapping` (silently skipped)
-- [ ] `xcodebuild build -scheme PixArtBackbone -destination 'platform=macOS'` succeeds
-- [ ] Unit test: `keyMapping("adaln_single.linear.weight")` returns expected MLX module path
-- [ ] Unit test: `keyMapping("transformer_blocks.0.attn1.to_q.weight")` returns expected MLX module path
-- [ ] Unit test: `keyMapping("pos_embed")` returns `nil`
-
-### Notes
-- The diffusers format stores self-attention as separate Q/K/V projections. The original PixArt format fuses them as `qkv`. Since we load from diffusers format (HuggingFace), we map the separate projections.
-- Decide in Sortie 2 whether the backbone uses fused QKV internally (requires concatenation in mapping) or separate Q/K/V (simpler 1:1 renames). Adjust mapping accordingly.
-- Cross-attention K/V are also stored separately in diffusers format (original fuses them as `kv_linear`).
+**Exit criteria**:
+- [ ] `make build` exits 0
+- [ ] `make test` exits 0
+- [ ] `Sources/PixArtBackbone/` contains at least one `.swift` file
+- [ ] `Sources/PixArtCLI/PixArtCLI.swift` exists and contains `@main`
+- [ ] `Tests/PixArtBackboneTests/` contains at least one test file
+- [ ] `Package.swift` declares `platforms: [.macOS(.v26), .iOS(.v26)]`
+- [ ] `Package.swift` specifies Swift `.v6` language mode
 
 ---
 
-## Sortie 4: Pipeline Recipe & Acervo Descriptors (P4 + P5)
+### Sortie 2: PixArt DiT Backbone (P2)
 
-**Priority**: 11.5 — Blocks CLI tool and integration tests. Recipe + descriptors are tightly coupled (recipe references component IDs that descriptors register).
+**Priority**: 23.5 — Core types and protocols reused by all subsequent WU1 sorties; complex algorithm risk (attention, embeddings, AdaLN-Zero).
 
-### Objective
-Implement `PixArtRecipe` conforming to SwiftTubería's `PipelineRecipe` protocol, and register all Acervo component descriptors. These two concerns are merged because the recipe's `allComponentIds` and the descriptor registrations share the same component ID strings and must be consistent.
+**Entry criteria**:
+- [ ] Sortie 1 complete (`PixArtBackbone` target compiles)
 
-### Entry Criteria
-- Sortie 2 complete (`PixArtDiTConfiguration` defined)
-- SwiftTubería `PipelineRecipe` protocol available
-- SwiftAcervo `ComponentDescriptor` and `Acervo.register()` API available (transitively)
+**Tasks** (verify existing files meet spec; fix any discrepancies):
+1. Verify `Sources/PixArtBackbone/PixArtDiTConfiguration.swift`: all architecture constants present — hiddenSize: 1152, numHeads: 16, headDim: 72, depth: 28, patchSize: 2, inChannels: 4, outChannels: 8, mlpRatio: 4.0, captionChannels: 4096, maxTextLength: 120; 64-bucket aspect ratio table present
+2. Verify `Sources/PixArtBackbone/Embeddings.swift`: 2D sinusoidal position embeddings (recomputed per forward pass); timestep sinusoidal embedding (dim 256 → MLP 256→1152); micro-condition embedders for resolution (2×384=768 flattened) and aspect ratio (384-dim)
+3. Verify `Sources/PixArtBackbone/Attention.swift`: self-attention with QK normalization (LayerNorm on q and k after reshape); cross-attention (no timestep modulation); both use `MLXFast.scaledDotProductAttention`; separate Q/K/V projections matching diffusers format
+4. Verify `Sources/PixArtBackbone/DiTBlock.swift`: norm1 → AdaLN-Zero self-attention → cross-attention (no modulation) → norm2 → AdaLN-Zero GEGLU FFN; per-block `scale_shift_table` (6 × 1152 params); `t2i_modulate(x, shift, scale) = x * (1 + scale) + shift` helper defined once
+5. Verify `Sources/PixArtBackbone/FinalLayer.swift`: AdaLN (2-param: shift+scale only, no gate) → Linear(1152, 32) → unpatchify to `[B, H/8, W/8, 8]`; last dim sliced `[..<4]` → outlet `[B, H/8, W/8, 4]`
+6. Verify `Sources/PixArtBackbone/PixArtDiT.swift`: patch embedding `Conv2d(4, 1152, kernel=2, stride=2)` → flatten to `[B, T, 1152]`; 2D sinusoidal pos embeddings added; caption projection `Linear(4096, 1152) → GELU(tanh) → Linear(1152, 1152)`; timestep pipeline: `sinusoidal(256) → MLP → concat micro-conditions → t_block: SiLU → Linear(1152, 6*1152)`; 28 DiT blocks; final layer; `Backbone` + `WeightedSegment` protocol conformance
 
-### Files
-| File | Action | Description |
-|------|--------|-------------|
-| `Sources/PixArtBackbone/PixArtRecipe.swift` | **Create** | `PipelineRecipe` conformance. Type aliases for encoder/scheduler/backbone/decoder/renderer. Configuration values for each. Memory profiles. Default generation parameters. |
-| `Sources/PixArtBackbone/PixArtComponents.swift` | **Create** | `PixArtComponents` enum with static `registered` property. Registers 3 component descriptors. Thread-safe one-time initialization via Swift static `let`. |
+**Exit criteria**:
+- [ ] `PixArtDiT` conforms to `Backbone` (inlet: `BackboneInput`, outlet: `MLXArray`)
+- [ ] `PixArtDiT` conforms to `WeightedSegment`
+- [ ] `PixArtDiTConfiguration` has all required properties matching: hiddenSize=1152, numHeads=16, headDim=72, depth=28, patchSize=2, inChannels=4, outChannels=8, mlpRatio=4.0, captionChannels=4096, maxTextLength=120
+- [ ] `expectedConditioningDim` == 4096, `outputLatentChannels` == 4, `expectedMaxSequenceLength` == 120
+- [ ] DiT block array count verifiable as exactly 28 via `blocks.count == 28`
+- [ ] GEGLU FFN: fc1 projects to 2×4608 (`4 * mlpRatio * hiddenSize = 18432 / 2 = 4608` per half), splits for gate×value, uses GELU(tanh)
+- [ ] `forward()` output sliced to `[B, H/8, W/8, 4]` (last 4 channels discarded)
+- [ ] `t2i_modulate` defined once and reused across `DiTBlock` and `FinalLayer`
+- [ ] Cross-attention in `DiTBlock` receives NO shift/scale/gate from timestep
+- [ ] `make build` exits 0
 
-### Dependencies
-- SwiftTubería `PipelineRecipe` protocol
-- SwiftTubería catalog configuration types: `T5XXLEncoderConfiguration`, `DPMSolverSchedulerConfiguration`, `SDXLVAEDecoderConfiguration`
-- SwiftAcervo `ComponentDescriptor` and `Acervo.register()` API
+---
 
-### Configuration Values (Recipe)
-| Config Property | Key Values |
-|-----------------|------------|
-| `encoderConfig` | componentId: `"t5-xxl-encoder-int4"`, maxSequenceLength: 120, embeddingDim: 4096 |
-| `schedulerConfig` | betaSchedule: `.linear(betaStart: 0.0001, betaEnd: 0.02)`, predictionType: `.epsilon`, solverOrder: 2, trainTimesteps: 1000 |
-| `backboneConfig` | hiddenSize: 1152, numHeads: 16, depth: 28, patchSize: 2, captionChannels: 4096 |
-| `decoderConfig` | componentId: `"sdxl-vae-decoder-fp16"`, latentChannels: 4, scalingFactor: 0.13025 |
-| `rendererConfig` | `Void` |
+### Sortie 3: Weight Key Mapping (P3)
 
-### Additional Properties (Recipe)
-| Property | Value |
-|----------|-------|
-| `supportsImageToImage` | `false` |
-| `unconditionalEmbeddingStrategy` | `.emptyPrompt` |
-| `allComponentIds` | `["t5-xxl-encoder-int4", "pixart-sigma-xl-dit-int4", "sdxl-vae-decoder-fp16"]` |
-| `quantizationFor(.backbone)` | `.asStored` |
-| Default steps | 20 |
-| Default guidance | 4.5 |
+**Priority**: 20.0 — Directly unblocks WU2 Sortie 8 (parallel) and all of WU1 Sorties 4–7 (sequential); defines the interface between PyTorch and MLX key spaces.
 
-### Component Descriptors (Acervo)
-| Component | Acervo ID | Type | HuggingFace Repo | Size (int4) |
-|-----------|-----------|------|-------------------|-------------|
-| PixArt-Sigma XL DiT | `pixart-sigma-xl-dit-int4` | `.backbone` | `intrusive-memory/pixart-sigma-xl-dit-int4-mlx` | ~300 MB |
-| T5-XXL | `t5-xxl-encoder-int4` | `.encoder` | `intrusive-memory/t5-xxl-int4-mlx` | ~1.2 GB |
-| SDXL VAE | `sdxl-vae-decoder-fp16` | `.decoder` | `intrusive-memory/sdxl-vae-fp16-mlx` | ~160 MB |
+**Entry criteria**:
+- [ ] Sortie 2 complete (MLX module paths are known from the implemented backbone)
 
-### Registration Pattern
-```swift
-public enum PixArtComponents {
-    public static let registered: Bool = {
-        Acervo.register([...])
-        return true
-    }()
-}
-```
-Pipeline assembly triggers: `_ = PixArtComponents.registered`
+**Tasks** (verify existing file meets spec; fix any discrepancies):
+1. Verify `Sources/PixArtBackbone/WeightMapping.swift`: `keyMapping: KeyMapping` closure with ~14 global pairs — patch embedding (`pos_embed.proj.*`), caption projection (`caption_projection.linear_{1,2}.*`), timestep/resolution/AR embedders (`adaln_single.emb.*`), t_block (`adaln_single.linear.*`), final layer (`proj_out.*`, `scale_shift_table`)
+2. Verify per-block mappings cover all 28 blocks (loop over index 0–27): `scale_shift_table` direct rename; self-attn `attn1.to_{q,k,v}.*` and `attn1.to_out.0.*`; QK norms `attn1.{q,k}_norm.*`; cross-attn `attn2.to_{q,k,v}.*` and `attn2.to_out.0.*`; FFN `ff.net.0.proj.*` and `ff.net.2.*`
+3. Verify `tensorTransform: TensorTransform`: applies `transpose(0, 2, 3, 1)` to Conv2d patch embedding weight only
+4. Verify `keyMapping` returns `nil` for discarded keys: `pos_embed` (recomputed at runtime) and `y_embedder.y_embedding` (unused in inference)
+5. Verify code comment listing all 224 LoRA-eligible keys (self-attn Q/K/V/out + cross-attn Q/K/V/out × 28 blocks)
 
-### Exit Criteria
-- [ ] `PixArtRecipe` type exists and conforms to `PipelineRecipe`
+**Exit criteria**:
+- [ ] `WeightMapping.swift` exists in `Sources/PixArtBackbone/`
+- [ ] `keyMapping("adaln_single.linear.weight")` returns a non-nil MLX module path
+- [ ] `keyMapping("transformer_blocks.0.attn1.to_q.weight")` returns a non-nil MLX module path
+- [ ] `keyMapping("pos_embed")` returns `nil`
+- [ ] `keyMapping("y_embedder.y_embedding")` returns `nil`
+- [ ] `tensorTransform` for the patch embedding Conv2d weight returns a transposed array
+- [ ] Code comment in `WeightMapping.swift` enumerates the 224 LoRA-eligible keys
+- [ ] `make build` exits 0
+
+---
+
+### Sortie 4: Pipeline Recipe & Acervo Descriptors (P4 + P5)
+
+**Priority**: 15.0 — Blocks CLI (Sortie 5) and tests (Sortie 6); external API risk from `Acervo.register()`.
+
+**Entry criteria**:
+- [ ] Sortie 2 complete (`PixArtDiTConfiguration` defined)
+- [ ] SwiftTubería `PipelineRecipe` protocol available in the resolved dependency
+
+**Tasks** (verify existing files meet spec; fix any discrepancies):
+1. Verify `Sources/PixArtBackbone/PixArtRecipe.swift`: `PixArtRecipe` conforms to `PipelineRecipe`; type aliases `Encoder = T5XXLEncoder`, `Sched = DPMSolverScheduler`, `Back = PixArtDiT`, `Dec = SDXLVAEDecoder`, `Rend = ImageRenderer`
+2. Verify configuration properties: `encoderConfig` (componentId: `"t5-xxl-encoder-int4"`, maxSequenceLength: 120, embeddingDim: 4096); `schedulerConfig` (linear beta schedule betaStart: 0.0001, betaEnd: 0.02, predictionType: .epsilon, solverOrder: 2, trainTimesteps: 1000); `backboneConfig` from `PixArtDiTConfiguration`; `decoderConfig` (componentId: `"sdxl-vae-decoder-fp16"`, latentChannels: 4, scalingFactor: 0.13025); `rendererConfig: Void = ()`
+3. Verify recipe properties: `supportsImageToImage: false`, `unconditionalEmbeddingStrategy: .emptyPrompt`, `allComponentIds: ["t5-xxl-encoder-int4", "pixart-sigma-xl-dit-int4", "sdxl-vae-decoder-fp16"]`, `quantizationFor(_:) = .asStored`; default steps: 20, default guidance: 4.5
+4. Verify `Sources/PixArtBackbone/PixArtComponents.swift`: `PixArtComponents` enum with `public static let registered: Bool` computed via Swift static initializer; registers 3 `ComponentDescriptor` entries via `Acervo.register()`
+5. Verify descriptors: `pixart-sigma-xl-dit-int4` (type `.backbone`, HuggingFace: `intrusive-memory/pixart-sigma-xl-dit-int4-mlx`); `t5-xxl-encoder-int4` (type `.encoder`, `intrusive-memory/t5-xxl-int4-mlx`); `sdxl-vae-decoder-fp16` (type `.decoder`, `intrusive-memory/sdxl-vae-fp16-mlx`)
+
+**Exit criteria**:
+- [ ] `PixArtRecipe` conforms to `PipelineRecipe`
 - [ ] `PixArtRecipe.encoderConfig.maxSequenceLength` == 120
-- [ ] `PixArtRecipe.schedulerConfig.betaSchedule` is `.linear(betaStart: 0.0001, betaEnd: 0.02)`
+- [ ] `PixArtRecipe.encoderConfig.embeddingDim` == 4096
+- [ ] `PixArtRecipe.schedulerConfig` uses `.linear(betaStart: 0.0001, betaEnd: 0.02)`
 - [ ] `PixArtRecipe.decoderConfig.scalingFactor` == 0.13025
-- [ ] `PixArtRecipe.allComponentIds` contains exactly `["t5-xxl-encoder-int4", "pixart-sigma-xl-dit-int4", "sdxl-vae-decoder-fp16"]`
+- [ ] `PixArtRecipe.allComponentIds` == `["t5-xxl-encoder-int4", "pixart-sigma-xl-dit-int4", "sdxl-vae-decoder-fp16"]`
 - [ ] `PixArtComponents.registered` evaluates to `true` without error
-- [ ] After `_ = PixArtComponents.registered`, `Acervo.component(id: "pixart-sigma-xl-dit-int4")` returns non-nil
-- [ ] After `_ = PixArtComponents.registered`, `Acervo.component(id: "t5-xxl-encoder-int4")` returns non-nil
-- [ ] After `_ = PixArtComponents.registered`, `Acervo.component(id: "sdxl-vae-decoder-fp16")` returns non-nil
-- [ ] `xcodebuild build -scheme PixArtBackbone -destination 'platform=macOS'` succeeds
-
-### Notes
-- PixArt uses a standard linear beta schedule, NOT shifted cosine. This is called out in ARCHITECTURE_STANDALONE.md A4.1 and errata A7.
-- The VAE stays in float16 — Conv2d layers do not benefit from weight-only quantization.
-- `unconditionalEmbeddingStrategy: .emptyPrompt` means CFG uses empty string encoding (not zero tensor).
-- T5-XXL and SDXL VAE are catalog components — their authoritative definitions live in SwiftTubería. This package re-registers them for safety. Acervo deduplicates by component ID (same ID + same repo = no-op).
-- The PixArt DiT HuggingFace repo is owned by this package and created during weight conversion (Sortie 6).
+- [ ] After `_ = PixArtComponents.registered`: `Acervo.component(id: "pixart-sigma-xl-dit-int4")` returns non-nil
+- [ ] After `_ = PixArtComponents.registered`: `Acervo.component(id: "t5-xxl-encoder-int4")` returns non-nil
+- [ ] After `_ = PixArtComponents.registered`: `Acervo.component(id: "sdxl-vae-decoder-fp16")` returns non-nil
+- [ ] `make build` exits 0
 
 ---
 
-## Sortie 5: LoRA Support Verification (P6)
+### Sortie 5: CLI Tool (P8)
 
-**Priority**: 7.5 — Low dependency depth (nothing depends on this). Verification-only sortie. Assign to haiku.
+**Priority**: 6.0 — Required by Sortie 7 (integration tests verify CLI help output); new-technology risk from async argument parser.
 
-### Objective
-Verify that the backbone's `keyMapping` covers all attention projection keys that LoRA adapters target. No new code unless gaps are found.
+**Entry criteria**:
+- [ ] Sortie 1 complete (`PixArtCLI` target in package)
+- [ ] Sortie 4 complete (recipe and component descriptors available)
 
-### Entry Criteria
-- Sortie 3 complete (weight key mapping implemented)
-- SwiftTubería LoRA infrastructure available
+**Tasks** (verify existing files meet spec; fix any discrepancies):
+1. Verify `Sources/PixArtCLI/PixArtCLI.swift`: `@main` struct using `AsyncParsableCommand`; declares `subcommands: [GenerateCommand.self, DownloadCommand.self, InfoCommand.self]`
+2. Verify `Sources/PixArtCLI/GenerateCommand.swift`: `--prompt` (required), `--width` (default 1024), `--height` (default 1024), `--output` (default `image.png`), `--steps` (default 20), `--guidance` (default 4.5), `--seed` (optional); calls `_ = PixArtComponents.registered`, assembles `PixArtRecipe`, calls `pipeline.generate()`
+3. Verify `Sources/PixArtCLI/DownloadCommand.swift`: fetches all model components via Acervo; reports download progress to stdout
+4. Verify `Sources/PixArtCLI/InfoCommand.swift`: prints model configuration, component IDs, estimated sizes, and download status for each component
+5. Verify `Sources/PixArtCLI/CLIUtilities.swift`: shared error formatting and progress display helpers used by multiple commands
 
-### Files
-| File | Action | Description |
-|------|--------|-------------|
-| `Sources/PixArtBackbone/WeightMapping.swift` | **Verify** | Confirm that `keyMapping` covers all attention projection keys that LoRA adapters target. No new code unless gaps found. |
-
-### LoRA Target Layers (per block, 28 blocks)
-- Self-attention: Q, K, V, output projections
-- Cross-attention: Q, K, V, output projections
-
-### Exit Criteria
-- [ ] For each of the 28 blocks, verify `keyMapping` handles LoRA keys for: self-attn Q, K, V, out; cross-attn Q, K, V, out (8 projections x 28 blocks = 224 keys)
-- [ ] Document the full list of LoRA-eligible keys in a code comment in `WeightMapping.swift`
-- [ ] If any gaps found: fix the mapping and rebuild (`xcodebuild build -scheme PixArtBackbone -destination 'platform=macOS'`)
-
-### Notes
-- REQUIREMENTS.md P6 states: "The backbone's `keyMapping` is reused for LoRA key translation — no separate LoRA target declaration is needed."
-- Constraint: single active LoRA per generation (same as FLUX). Multiple LoRAs require sequential load/unload.
-- This sortie is intentionally lightweight — the infrastructure lives in SwiftTubería. The work here is verification, not implementation.
+**Exit criteria**:
+- [ ] `make build` exits 0
+- [ ] Running the built binary with `--help` prints `generate`, `download`, `info` as listed subcommands
+- [ ] `pixart-cli generate --help` output contains: `--prompt`, `--width`, `--height`, `--output`, `--steps`, `--guidance`, `--seed`
+- [ ] `pixart-cli download --help` exits 0
+- [ ] `pixart-cli info --help` exits 0
+- [ ] All 4 CLI source files exist under `Sources/PixArtCLI/`
+- [ ] `GenerateCommand.swift` contains `_ = PixArtComponents.registered` before pipeline assembly
 
 ---
 
-## Sortie 6: Weight Conversion Scripts (P7)
+### Sortie 6: Unit Tests (P9.1 + P9.4)
 
-**Priority**: 10.0 — External dependency (PyTorch, HuggingFace). High risk (PSNR validation). Parallel with Sorties 4-5. Assign to opus.
+**Priority**: 5.0 — Only Sortie 7 is blocked by this sortie; test code is low-risk.
 
-### Objective
-Create Python scripts to convert PyTorch weights to MLX safetensors format. Validate conversions via forward pass comparison.
+**Entry criteria**:
+- [ ] Sorties 2–4 complete (backbone, weight mapping, recipe, and descriptors all implemented)
 
-### Entry Criteria
-- Sortie 3 complete (key mapping defines the target key names)
-- Python 3.10+ with torch, transformers, diffusers, safetensors, mlx, numpy available
-- Access to HuggingFace models: `PixArt-alpha/PixArt-Sigma-XL-2-1024-MS`, `google/t5-v1_1-xxl`, `stabilityai/sdxl-vae`
+**Tasks** (verify all 8 test files meet spec; fix any gaps):
+1. Verify `Tests/PixArtBackboneTests/AttentionTests.swift`: self-attention output shape (synthetic input, no weights); QK norm layers present; cross-attention with separate Q/KV — Q from image tokens, KV from text
+2. Verify `Tests/PixArtBackboneTests/DiTBlockTests.swift`: synthetic `[1, 16, 1152]` input + conditioning `[1, 120, 4096]` + timestep modulation tensor → output shape `[1, 16, 1152]`; `scale_shift_table` parameter count is 6×1152
+3. Verify `Tests/PixArtBackboneTests/EmbeddingsTests.swift`: 2D sinusoidal embedding for `(H=8, W=8)` → shape `[1, 64, 1152]`; timestep sinusoidal for `B=2` → shape `[2, 256]`; micro-condition embedder output shape verified
+4. Verify `Tests/PixArtBackboneTests/PatchEmbeddingTests.swift`: input `[1, 32, 32, 4]` → patch embed → output shape `[1, 256, 1152]` (32/2 × 32/2 = 256 patches)
+5. Verify `Tests/PixArtBackboneTests/FinalLayerTests.swift`: input `[1, 256, 1152]` → final layer → unpatchify → output shape `[1, 16, 16, 4]`
+6. Verify `Tests/PixArtBackboneTests/WeightMappingTests.swift`: `keyMapping("adaln_single.linear.weight")` non-nil; `keyMapping("transformer_blocks.0.attn1.to_q.weight")` non-nil; `keyMapping("transformer_blocks.27.attn2.to_out.0.weight")` non-nil; `keyMapping("pos_embed")` nil; `keyMapping("y_embedder.y_embedding")` nil; Conv2d transposition produces correct shape
+7. Verify `Tests/PixArtBackboneTests/RecipeTests.swift`: `encoderConfig.maxSequenceLength == 120`, `encoderConfig.embeddingDim == 4096`, `decoderConfig.scalingFactor == 0.13025`, `allComponentIds == ["t5-xxl-encoder-int4", "pixart-sigma-xl-dit-int4", "sdxl-vae-decoder-fp16"]`, `supportsImageToImage == false`, `unconditionalEmbeddingStrategy == .emptyPrompt`
+8. Verify `Tests/PixArtBackboneTests/ComponentRegistrationTests.swift`: `_ = PixArtComponents.registered`; `Acervo.component(id: "pixart-sigma-xl-dit-int4")` != nil; `Acervo.component(id: "t5-xxl-encoder-int4")` != nil; `Acervo.component(id: "sdxl-vae-decoder-fp16")` != nil
 
-### Files
-| File | Action | Description |
-|------|--------|-------------|
-| `scripts/convert_pixart_weights.py` | **Create** | PixArt-Sigma PyTorch -> int4 MLX safetensors. Key remapping, Conv2d transposition, int4 quantization (group_size=64). |
-| `scripts/convert_t5_weights.py` | **Create** | T5-XXL PyTorch -> int4 MLX safetensors. Shared with any future T5 consumer. |
-| `scripts/convert_vae_weights.py` | **Create** | SDXL VAE PyTorch -> float16 MLX safetensors. No quantization (Conv2d layers). |
-| `scripts/requirements.txt` | **Create** | Python dependencies: torch, transformers, diffusers, safetensors, mlx, numpy. |
-| `scripts/validate_conversion.py` | **Create** | Validation harness: run 5 deterministic prompts at known seeds on both PyTorch and MLX, compare PSNR. |
-
-### Dependencies
-- PyTorch reference models (HuggingFace: `PixArt-alpha/PixArt-Sigma-XL-2-1024-MS`)
-- T5-XXL model (HuggingFace: `google/t5-v1_1-xxl`)
-- SDXL VAE (HuggingFace: `stabilityai/sdxl-vae`)
-- Python 3.10+, mlx Python package
-
-### Conversion Steps (per script)
-1. Load PyTorch state dict from HuggingFace
-2. Apply key remappings (matching ARCHITECTURE_STANDALONE.md A6 tables)
-3. Apply tensor transformations (Conv2d transposition for MLX NHWC)
-4. Quantize (int4 group_size=64 for transformer/T5, float16 for VAE)
-5. Save as MLX safetensors with `config.json`
-6. Upload to `intrusive-memory` HuggingFace organization
-
-### Quantization Format (int4, group_size=64)
-For each `Linear` weight `[M, N]`:
-- `weight` -> `[M, N/8]` uint32 (packed 4-bit)
-- `scales` -> `[M, N/64]` float16
-- `biases` -> `[M, N/64]` float16 (quantization zero-points)
-- `bias` (singular, if present) -> unchanged float16
-
-### Validation Protocol
-1. Convert weights (PyTorch -> MLX safetensors)
-2. Run forward pass with 5 deterministic prompts at known seeds on both PyTorch and MLX
-3. Compare per-layer activations (where feasible) and final output images
-4. **All outputs must achieve PSNR > 30 dB vs PyTorch reference**
-5. Per-layer validation: investigate if any single layer drops below 25 dB (even if end-to-end passes)
-
-### Exit Criteria
-- [ ] `scripts/convert_pixart_weights.py` runs without error: `python scripts/convert_pixart_weights.py --output /tmp/pixart-dit-int4`
-- [ ] `scripts/convert_t5_weights.py` runs without error: `python scripts/convert_t5_weights.py --output /tmp/t5-xxl-int4`
-- [ ] `scripts/convert_vae_weights.py` runs without error: `python scripts/convert_vae_weights.py --output /tmp/sdxl-vae-fp16`
-- [ ] `scripts/requirements.txt` exists and `pip install -r scripts/requirements.txt` succeeds
-- [ ] Each output directory contains `config.json` and at least one `.safetensors` file
-- [ ] `scripts/validate_conversion.py` reports PSNR > 30 dB for all 5 validation prompts per component
-- [ ] No unmapped keys in conversion output (all PyTorch keys either mapped or explicitly discarded)
-- [ ] HuggingFace repos created under `intrusive-memory` org: `pixart-sigma-xl-dit-int4-mlx`, `t5-xxl-int4-mlx`, `sdxl-vae-fp16-mlx`
-
-### Notes
-- 30 dB PSNR threshold is conservative and accounts for int4 quantization fidelity loss.
-- The VAE is NOT quantized — stays in float16.
-- `scale_shift_table`, LayerNorm weights, Conv2d patch embed weights, and Embedding weights all stay in float16 (not quantized).
-- T5 `shared.weight` (Embedding) and `relative_attention_bias` (Embedding) stay in float16.
-- Pin the diffusers version in `requirements.txt` to prevent key name changes from breaking the mapping.
-
----
-
-## Sortie 7: CLI Tool (P8)
-
-**Priority**: 9.0 — End-user deliverable. Depends on Sorties 1-4. Assign to sonnet.
-
-### Objective
-Implement the `PixArtCLI` standalone executable for testing image generation outside of SwiftVinetas.
-
-### Entry Criteria
-- Sortie 1 complete (package structure with PixArtCLI target)
-- Sortie 4 complete (recipe and component descriptors available)
-
-### Files
-| File | Action | Description |
-|------|--------|-------------|
-| `Sources/PixArtCLI/PixArtCLI.swift` | **Rewrite** | `@main` struct using swift-argument-parser. Root command with subcommands. |
-| `Sources/PixArtCLI/GenerateCommand.swift` | **Create** | `generate` subcommand: --prompt, --width, --height, --output, --steps (default 20), --guidance (default 4.5), --seed. Assembles PixArt pipeline recipe, calls `pipeline.generate()`. |
-| `Sources/PixArtCLI/DownloadCommand.swift` | **Create** | `download` subcommand: fetch all model components via Acervo. Progress reporting. |
-| `Sources/PixArtCLI/InfoCommand.swift` | **Create** | `info` subcommand: show model details, component sizes, download status. |
-
-### Dependencies
-- Sortie 1 (package structure with PixArtCLI target)
-- Sortie 4 (recipe and component descriptors)
-- swift-argument-parser
-- SwiftTubería pipeline assembly API
-
-### CLI Interface
-```bash
-pixart-cli generate --prompt "a cat sitting on a windowsill" --width 1024 --height 1024 --output image.png
-pixart-cli generate --prompt "..." --steps 30 --guidance 5.0 --seed 42
-pixart-cli download              # fetch all model components
-pixart-cli info                  # show model details and download status
-```
-
-### Exit Criteria
-- [ ] `xcodebuild build -scheme PixArtCLI -destination 'platform=macOS'` succeeds
-- [ ] `pixart-cli --help` prints usage information with `generate`, `download`, and `info` subcommands listed
-- [ ] `pixart-cli generate --help` lists all flags: --prompt, --width, --height, --output, --steps, --guidance, --seed
-- [ ] `pixart-cli download --help` prints usage for the download subcommand
-- [ ] `pixart-cli info --help` prints usage for the info subcommand
-- [ ] `GenerateCommand.swift` calls `_ = PixArtComponents.registered` before pipeline assembly
-- [ ] All 4 CLI source files exist in `Sources/PixArtCLI/`
-
-### Notes
-- The CLI is a thin wrapper (~50 lines per command) around the pipeline API. No model logic lives here.
-- Error handling: surface Acervo download errors, pipeline assembly errors, and generation errors with human-readable messages.
-- The `generate` command triggers `_ = PixArtComponents.registered` to ensure Acervo registration.
-- End-to-end integration testing of the CLI (actual image generation) is deferred to Sortie 9 (integration tests).
-
----
-
-## Sortie 8: Unit Tests (P9.1)
-
-**Priority**: 8.5 — Validates all backbone code. Must pass before integration tests.
-
-### Objective
-Implement unit tests for all backbone components using synthetic inputs (no real weights or GPU required).
-
-### Entry Criteria
-- Sorties 2-4 complete (all backbone code, weight mapping, recipe, and descriptors)
-
-### Files
-| File | Action | Description |
-|------|--------|-------------|
-| `Tests/PixArtBackboneTests/DiTBlockTests.swift` | **Create** | DiT block forward pass: synthetic input -> expected output shape. AdaLN modulation verification. |
-| `Tests/PixArtBackboneTests/AttentionTests.swift` | **Create** | Self-attention shape, QK norm, cross-attention Q/KV split. |
-| `Tests/PixArtBackboneTests/EmbeddingsTests.swift` | **Create** | 2D sinusoidal position embedding shapes, timestep embedding, micro-condition embedders. |
-| `Tests/PixArtBackboneTests/PatchEmbeddingTests.swift` | **Create** | Spatial -> sequence conversion, correct output dimensions. |
-| `Tests/PixArtBackboneTests/FinalLayerTests.swift` | **Create** | Unpatchify output shape, variance channel handling. |
-| `Tests/PixArtBackboneTests/WeightMappingTests.swift` | **Create** | Key mapping produces expected output for representative sample keys. Coverage of all ~200 keys. |
-| `Tests/PixArtBackboneTests/RecipeTests.swift` | **Create** | Recipe configuration values match spec. Shape contracts validated. |
-| `Tests/PixArtBackboneTests/ComponentRegistrationTests.swift` | **Create** | Acervo registration produces expected component IDs. |
-
-### Dependencies
-- Sorties 2-4 complete (all backbone code, weight mapping, recipe, descriptors)
-
-### Unit Test Strategy
-- All tests use synthetic `MLXArray` inputs with known shapes
-- No real model weights required
-- No GPU compute required (MLX evaluates lazily but shapes are validated)
-- Deterministic — no randomness, no timing dependencies
-- No `sleep()`, `Task.sleep()`, or wall-clock assertions
-
-### Exit Criteria
+**Exit criteria**:
 - [ ] All 8 test files exist in `Tests/PixArtBackboneTests/`
-- [ ] `xcodebuild test -scheme PixArtBackbone -destination 'platform=macOS'` passes all unit tests
-- [ ] Placeholder test from original `PixArtMLXTests.swift` removed
-- [ ] `WeightMappingTests.swift` tests at least: 3 global keys, 3 per-block keys, 2 discarded keys, 1 Conv2d transposition
-- [ ] `RecipeTests.swift` verifies all configuration values from REQUIREMENTS.md P4
-- [ ] `ComponentRegistrationTests.swift` verifies all 3 component IDs are registered
-- [ ] `DiTBlockTests.swift` verifies output shape matches input shape (hidden dim preserved)
-- [ ] `AttentionTests.swift` verifies QK norm is applied in self-attention
-- [ ] `EmbeddingsTests.swift` verifies 2D sinusoidal embedding output shape
-- [ ] No test uses `sleep()`, `Task.sleep()`, or wall-clock assertions
-
-### Notes
-- What is NOT tested here (tested in SwiftTubería): T5XXLEncoder, SDXLVAEDecoder, DPMSolverScheduler, ImageRenderer, weight loading mechanics.
-- Original placeholder test in `PixArtMLXTests.swift` must be removed/replaced.
+- [ ] `make test` exits 0 (all unit tests pass)
+- [ ] Zero uses of `sleep()`, `Task.sleep()`, `Thread.sleep()`, or fixed-duration timeouts in any test file
+- [ ] `WeightMappingTests.swift` covers ≥3 global keys, ≥3 per-block keys, ≥2 nil-return keys, ≥1 Conv2d transposition
+- [ ] `RecipeTests.swift` asserts: maxSequenceLength==120, betaStart==0.0001, betaEnd==0.02, scalingFactor==0.13025, allComponentIds exact-equal
+- [ ] `ComponentRegistrationTests.swift` asserts all 3 component IDs return non-nil
+- [ ] `DiTBlockTests.swift` asserts output shape preserves hidden dim (1152)
+- [ ] `AttentionTests.swift` asserts QK norm is applied in self-attention path
 
 ---
 
-## Sortie 9: Integration Tests & CI Finalization (P9.2)
+### Sortie 7: Integration Tests & CI Finalization (P9.2 + P9.4)
 
-**Priority**: 6.0 — Final validation. Depends on everything else.
+**Priority**: 4.0 — Terminal sortie for WU1; no downstream dependencies. CI configuration risk (external system).
 
-### Objective
-Implement gated integration tests for end-to-end generation and finalize CI configuration.
+**Entry criteria**:
+- [ ] Sortie 6 complete (all unit tests passing)
+- [ ] Sortie 5 complete (CLI tool builds)
 
-### Entry Criteria
-- Sortie 8 complete (all unit tests passing)
-- Sortie 7 complete (CLI tool builds)
-- Model weights available (either locally or via Acervo download)
+**Tasks** (verify existing files meet spec; fix any gaps):
+1. Verify `Tests/PixArtBackboneTests/BackboneForwardTests.swift`: instantiates `PixArtDiT` with config; provides synthetic weights via `apply(weights:)`; calls `forward()` with synthetic `BackboneInput` (latents `[1, 128, 128, 4]`, conditioning `[1, 120, 4096]`, conditioningMask `[1, 120]`, timestep `[1]`); asserts output shape is `[1, 128, 128, 4]`
+2. Verify `Tests/PixArtBackboneTests/IntegrationTests.swift`: all test methods wrapped in `#if INTEGRATION_TESTS`; seed reproducibility test runs twice with seed 42 and asserts `computePSNR(image1:image2:) > 40.0`; two-phase loading test verifies `pipeline.encodePrompt()` → `pipeline.unloadEncoder()` → `pipeline.denoise()` sequence completes without error; `computePSNR` helper function present in the file
+3. Update `.github/workflows/tests.yml`: remove the `build-ios` job (iOS is out of scope); macOS test job must use `runs-on: macos-26` and run `xcodebuild test -scheme pixart-swift-mlx-Package -destination 'platform=macOS,arch=arm64'`; no CI step sets `INTEGRATION_TESTS` compiler flag
 
-### Files
-| File | Action | Description |
-|------|--------|-------------|
-| `Tests/PixArtBackboneTests/BackboneForwardTests.swift` | **Create** | Full backbone forward pass with synthetic weights. Output shape [B, H/8, W/8, 4]. |
-| `Tests/PixArtBackboneTests/IntegrationTests.swift` | **Create** | `#if INTEGRATION_TESTS` gated. Full pipeline: prompt -> CGImage. Seed reproducibility. Two-phase loading. |
-| `.github/workflows/tests.yml` | **Verify** | CI runs unit tests on macOS 26 and iOS Simulator (iPhone 17, OS 26.1). Integration tests NOT run in CI (require GPU + weights). |
-
-### Integration Test Strategy
-- `#if INTEGRATION_TESTS` compilation flag
-- Requires downloaded model weights
-- Full pipeline assembly and generation
-- Seed reproducibility: same seed -> PSNR > 40 dB between runs
-- Two-phase loading on simulated memory budget
-
-### Coverage Requirements
-- >= 90% line coverage on all new code (unit + integration tests combined)
-- No `sleep()`, `Task.sleep()`, or wall-clock assertions
-- No environment-dependent unit tests
-- Flaky tests treated as failures
-
-### Exit Criteria
-- [ ] `Tests/PixArtBackboneTests/BackboneForwardTests.swift` exists and tests full forward pass with synthetic data
-- [ ] `Tests/PixArtBackboneTests/IntegrationTests.swift` exists with `#if INTEGRATION_TESTS` gate
-- [ ] `BackboneForwardTests` verifies output shape is `[1, H/8, W/8, 4]` for 1024x1024 input (H/8=128, W/8=128)
-- [ ] `xcodebuild test -scheme PixArtBackbone -destination 'platform=macOS'` passes (unit tests + backbone forward)
-- [ ] CI workflow (`.github/workflows/tests.yml`) runs unit tests on both macOS and iOS Simulator targets
-- [ ] Integration tests pass locally when `INTEGRATION_TESTS` flag is set (gated, not in CI)
-- [ ] No flaky tests in 3 consecutive CI runs
-
-### Notes
-- Cross-platform reproducibility (macOS vs iPadOS) targets PSNR > 30 dB (not byte-identical — MLX makes no such promise).
-- Integration tests are NOT run in CI — they require downloaded model weights and GPU compute.
+**Exit criteria**:
+- [ ] `Tests/PixArtBackboneTests/BackboneForwardTests.swift` exists
+- [ ] `BackboneForwardTests` passes with output shape `[1, 128, 128, 4]` (1024×1024 input → 1024/8=128 spatial): `make test` exits 0
+- [ ] `Tests/PixArtBackboneTests/IntegrationTests.swift` exists with `#if INTEGRATION_TESTS` guard on all test methods
+- [ ] `make test` exits 0 (unit tests + BackboneForwardTests; integration tests gated out)
+- [ ] `.github/workflows/tests.yml` specifies `runs-on: macos-26`; contains only the macOS test job (no iOS job)
+- [ ] No CI step sets `INTEGRATION_TESTS` compiler flag
 
 ---
 
-## Parallelism Structure
+## Work Unit 2: Weight Conversion Scripts
 
-**Critical Path**: Sortie 1 -> Sortie 2 -> Sortie 3 -> Sortie 4 -> Sortie 7 -> Sortie 8 -> Sortie 9 (7 sorties)
+### Sortie 8: Weight Conversion Scripts (P7)
 
-**Parallel Execution Groups**:
+**Priority**: 4.5 — Terminal sortie for WU2; no Swift build dependency. External API risk (HuggingFace + MLX quantization).
 
-- **Group 1** (sequential, single agent — SUPERVISING AGENT):
-  - Sortie 1: Package Structure (has build step)
+**Entry criteria**:
+- [ ] Work Unit 1 Sortie 3 complete (key mapping implemented — defines target MLX key names)
+- [ ] Python 3.10+ available in the execution environment
+- [ ] HuggingFace model access verified: `python -c "from huggingface_hub import HfApi; HfApi().model_info('PixArt-alpha/PixArt-Sigma-XL-2-1024-MS')"` exits 0
 
-- **Group 2** (sequential, single agent — SUPERVISING AGENT):
-  - Sortie 2: DiT Backbone (has build step — opus model)
+**Tasks** (verify existing files meet spec; fix any gaps):
+1. Verify `scripts/requirements.txt`: `diffusers` pinned to exact version (currently `diffusers==0.32.2`) to lock key names; `torch`, `transformers`, `safetensors`, `mlx`, `numpy` use minimum-version constraints; `pip install -r scripts/requirements.txt` exits 0
+2. Verify `scripts/convert_pixart_weights.py`: loads PixArt-Sigma-XL-2-1024-MS state dict from HuggingFace; applies `keyMapping` renames matching `WeightMapping.swift`; applies Conv2d transposition `[O,I,kH,kW] → [O,kH,kW,I]`; int4 quantizes Linear weights (group_size=64: pack to `uint32`, save `scales` and `biases` in float16); saves MLX safetensors + `config.json` to `--output` path
+3. Verify `scripts/convert_t5_weights.py`: loads T5-v1_1-xxl; int4 quantizes Linear weights (group_size=64); keeps `shared.weight` and `relative_attention_bias` in float16; saves MLX safetensors + `config.json`
+4. Verify `scripts/convert_vae_weights.py`: loads SDXL VAE; casts all weights to float16 (no quantization — Conv2d layers); saves MLX safetensors + `config.json`
+5. Verify `scripts/validate_conversion.py`: runs 5 deterministic prompts at fixed seeds on both PyTorch and MLX; computes per-output PSNR; logs `WARNING: Layer {name} PSNR={value:.1f}dB < 25dB threshold` to stderr for any layer below 25 dB (then continues); fails with non-zero exit code if any end-to-end PSNR < 30 dB
 
-- **Group 3** (can run in parallel after Sortie 2 completes):
-  - Sortie 3: Weight Key Mapping (Agent 1 — SUPERVISING AGENT, has build step)
-  - No parallel work available here — Sorties 4-9 all depend on Sortie 3
-
-- **Group 4** (can run in parallel after Sortie 3 completes):
-  - Sortie 4: Recipe + Descriptors (Agent 1 — SUPERVISING AGENT, has build step)
-  - Sortie 5: LoRA Verification (Agent 2 — sub-agent, NO BUILD, haiku model)
-  - Sortie 6: Weight Conversion Scripts (Agent 3 — sub-agent, NO BUILD, opus model)
-
-- **Group 5** (after Sortie 4 completes):
-  - Sortie 7: CLI Tool (Agent 1 — SUPERVISING AGENT, has build step)
-
-- **Group 6** (sequential after Sortie 7):
-  - Sortie 8: Unit Tests (Agent 1 — SUPERVISING AGENT, has build/test step)
-
-- **Group 7** (final):
-  - Sortie 9: Integration Tests & CI (Agent 1 — SUPERVISING AGENT, has build/test step)
-
-**Agent Constraints**:
-- **Supervising agent**: Handles Sorties 1, 2, 3, 4, 7, 8, 9 (all have build/compile steps)
-- **Sub-agent 1** (haiku): Sortie 5 (LoRA verification — read-only analysis)
-- **Sub-agent 2** (opus): Sortie 6 (Python weight conversion scripts — file creation, no Swift build)
-
-**Maximum parallelism**: 3 agents in Group 4 (Sorties 4 + 5 + 6 simultaneously)
+**Exit criteria**:
+- [ ] `scripts/requirements.txt` exists; `pip install -r scripts/requirements.txt` exits 0
+- [ ] `diffusers` is pinned to an exact version (e.g., `diffusers==0.32.2`) in requirements.txt; grep `diffusers==[0-9]` exits 0
+- [ ] `python scripts/convert_pixart_weights.py --output /tmp/pixart-dit-int4` exits 0 and directory contains `config.json` + at least one `.safetensors` file
+- [ ] `python scripts/convert_t5_weights.py --output /tmp/t5-xxl-int4` exits 0 and directory contains `config.json` + at least one `.safetensors` file
+- [ ] `python scripts/convert_vae_weights.py --output /tmp/sdxl-vae-fp16` exits 0 and directory contains `config.json` + at least one `.safetensors` file
+- [ ] `python scripts/validate_conversion.py` reports PSNR > 30 dB for all 5 validation prompts per converted component
+- [ ] No unmapped PyTorch key appears in conversion output without an explicit discard entry
 
 ---
 
 ## Dependency Graph
 
 ```
-Sortie 0: Reconnaissance (COMPLETED)
-    |
-    v
 Sortie 1: Package Structure
-    |
-    v
+    │
+    ▼
 Sortie 2: DiT Backbone
-    |
-    v
-Sortie 3: Weight Key Mapping ─────────────────────────────┐
-    |                          \                            |
-    v                           v                           v
-Sortie 4: Recipe + Descriptors  Sortie 5: LoRA (parallel)  Sortie 6: Conversion Scripts (parallel)
-    |
-    v
-Sortie 7: CLI Tool
-    |
-    v
-Sortie 8: Unit Tests
-    |
-    v
-Sortie 9: Integration Tests & CI
+    │
+    ▼
+Sortie 3: Weight Key Mapping ──────────────────► Sortie 8: Conversion Scripts (WU2, sub-agent)
+    │
+    ▼
+Sortie 4: Recipe & Acervo Descriptors
+    │
+    ├──────────────────────────────────────────► Sortie 6: Unit Tests (independent of S5)
+    ▼
+Sortie 5: CLI Tool
+    │         │
+    └────┬────┘
+         │ (both required)
+         ▼
+Sortie 7: Integration Tests & CI
 ```
 
-**Critical path**: 1 -> 2 -> 3 -> 4 -> 7 -> 8 -> 9
+**Critical path** (Work Unit 1): 1 → 2 → 3 → 4 → 5 → 7 (length: 6)
 
-**Parallel work**:
-- Sortie 6 (conversion scripts) can proceed in parallel with Sorties 4-5 once Sortie 3 defines the key mapping
-- Sortie 5 (LoRA verification) can proceed in parallel with Sortie 4 once Sortie 3 is complete
+**Parallelism note**: After Sortie 4 completes, Sorties 5 and 6 are independent. Both require `xcodebuild` (supervising agent), so they run sequentially. Optimal order: Sortie 5 first (higher priority: 6.0 vs 5.0).
+
+---
+
+## Parallelism Structure
+
+**Critical Path**: Sortie 1 → 2 → 3 → 4 → 5 → 7 (6 sorties)
+
+**Parallel Execution Groups**:
+
+- **Group 1** (sequential — all depend on previous sortie):
+  - WU1 Sortie 1–4 — SUPERVISING AGENT (each has `make build` step)
+
+- **Group 2** (parallel window — opens when Sortie 3 completes):
+  - WU1 Sortie 4 → 5 → 6 → 7 — SUPERVISING AGENT (sequential; all require `make build` or `make test`)
+  - WU2 Sortie 8 — **SUB-AGENT, NO BUILD** (Python scripts only; no `xcodebuild` or `make` Swift targets)
+
+**Agent Constraints**:
+- **Supervising agent**: All sorties with `make build`, `make test`, or `xcodebuild` steps (Sorties 1–7)
+- **Sub-agent**: WU2 Sortie 8 only — Python script verification; no Swift build operations
+
+**Maximum parallelism**: 2 agents simultaneously (1 supervising + 1 sub-agent)
 
 ---
 
 ## Open Questions & Missing Documentation
 
-### Unresolved Items (must address before execution)
+### Issues Requiring Manual Review Before Execution
 
-| Sortie | Issue Type | Description | Recommendation |
-|--------|-----------|-------------|----------------|
-| Sortie 1 | External dependency | SwiftTubería package URL not yet confirmed | Use `https://github.com/intrusive-memory/SwiftTubería` as assumed URL. If not yet published, use branch dependency: `.package(url: "...", branch: "main")`. Sortie agent should check if the repo exists before proceeding. |
-| Sortie 2 | Open question | Fused QKV vs separate Q/K/V in backbone self-attention: "Decide in Sortie 2 and adjust [key mapping] here" | **Decision**: Use separate Q/K/V projections (matching diffusers format) for simpler 1:1 key mapping. This avoids concatenation logic in the key mapping closure. Document this decision in `Attention.swift`. |
-| Sortie 2 | Open question | Cross-attention: fused KV linear vs separate K/V | **Decision**: Use separate K/V projections (matching diffusers format). Same rationale as self-attention. |
-| Sortie 6 | External dependency | Validation requires access to HuggingFace models (~11 GB total download) and GPU for forward pass comparison | Ensure the execution environment has sufficient disk space and network access. Pin exact model revision hashes in scripts. |
-| Sortie 6 | Vague criterion (auto-fixed) | Original: "HuggingFace repos created and populated" | Fixed to: specific repo names with verification commands |
-| Sortie 9 | External dependency | Integration tests require downloaded model weights (~1.7 GB) and GPU | Integration tests are gated behind `#if INTEGRATION_TESTS`. Unit tests (Sortie 8) provide primary coverage. Integration tests run manually, not in CI. |
-
-### Resolved Items (auto-fixed during refinement)
-
-| Sortie | Original Issue | Fix Applied |
-|--------|---------------|-------------|
-| All | Exit criteria used `- item` format (not machine-verifiable checkboxes) | Converted to `- [ ]` checklist format |
-| S1 | "CI workflow updated and passing" (vague) | Replaced with: "CI workflow updated: `.github/workflows/tests.yml` references correct scheme names" |
-| S2 | "Forward pass compiles with synthetic input" (vague) | Replaced with specific `xcodebuild build` command |
-| S4 (old) | "Pipeline assembly with PixArtRecipe passes validation (shape contracts match)" (vague) | Replaced with specific property value checks |
-| S4 (old) | "Memory profile values are documented and accessible" (vague) | Removed — memory profiles are documentation, not code artifacts |
-| S5 (old) | "T5-XXL and SDXL VAE descriptors match SwiftTubería requirements/CATALOG.md values exactly" (not machine-verifiable without the reference file) | Replaced with specific component ID lookup assertions |
-| S7 (old, now conversion scripts) | "All 3 conversion scripts run successfully" (no specific commands) | Replaced with explicit `python scripts/convert_*.py --output /tmp/...` commands |
-| S8 (old, now CLI) | "pixart-cli generate produces a valid PNG" (requires weights) | Deferred to integration tests; CLI sortie exit criteria focus on build and --help verification |
-| S9 (old, now unit tests + integration split) | Single oversized sortie (10 test files, ~500 LoC, 90% budget) | Split into Sortie 8 (unit tests, 8 files) and Sortie 9 (integration tests, 2 files + CI) |
+| # | Sortie | Type | Description | Recommendation |
+|---|--------|------|-------------|----------------|
+| 1 | All | **Scope** | All described artifacts already exist in the repository (source files, tests, scripts, CI workflow). The plan was originally written for a greenfield build but the implementation is now complete. | ✓ **Auto-fixed**: All sorties reframed from "Create" to "Verify/Fix". Execution proceeds as a spec-compliance verification pass. |
+| 2 | S7 | **CI gap** | `.github/workflows/tests.yml` has a `build-ios` job that only builds (not tests) on iOS. | ✓ **Resolved**: iOS is out of scope (REQUIREMENTS.md P1.3). Remove the `build-ios` job entirely. macOS-only CI. |
+| 3 | All | **Build commands** | All exit criteria throughout the original plan used `-scheme PixArtBackbone` or `-scheme PixArtCLI`. The project's correct scheme is `pixart-swift-mlx-Package` (Makefile: `SCHEME = pixart-swift-mlx-Package`). | ✓ **Auto-fixed**: All exit criteria updated to `make build` / `make test` / `make test-python`. |
+| 4 | S1 | **Test framework** | Original plan specified "XCTestCase subclass" in test placeholder. Existing implementation uses Swift Testing (`@Suite` / `@Test` / `#expect`). | ✓ **Auto-fixed**: Task description updated to Swift Testing terminology. |
+| 5 | S8 | **requirements.txt pinning** | Plan task description said "pin exact versions" for all packages. Existing file uses exact pin only for `diffusers==0.32.2` (the one that needs key-name stability) and `>=` ranges for others. | ✓ **Auto-fixed**: Task description updated to specify diffusers exact pin + minimum-version constraints for others. Added `grep diffusers==` exit criterion to enforce the pin. |
 
 ---
 
-## Risk Register
+## Summary
 
-| Risk | Impact | Mitigation |
-|------|--------|------------|
-| SwiftTubería protocols not yet finalized | Blocks Sorties 2-4 | Use branch dependency; mock protocols locally if needed |
-| Weight conversion PSNR below 30 dB | Blocks Sortie 6 validation | Per-layer debugging; check dtype handling (float32 for norms); adjust quantization group_size |
-| MLX attention kernel numerics differ from PyTorch | Subtle output differences | Use MLXFast.scaledDotProductAttention with explicit scale; validate per-layer |
-| HuggingFace diffusers format changes key names | Key mapping breaks | Pin diffusers version in scripts; document exact model revision hash |
-| iPad memory pressure during two-phase loading | OOM on 8 GB devices | Validate phase transitions with `Memory.clearCache()`; test on simulator with memory budget |
-| GEGLU gating implementation variance | Incorrect FFN output | Match exact PyTorch implementation: fc1 -> split -> GELU(tanh) * linear; test against reference |
+| Metric | Value |
+|--------|-------|
+| Work units | 2 |
+| Total sorties | 8 |
+| Dependency structure | layers |
+| Requirements detected | 11 (P1–P11; P11 is reference-only, no sorties) |
+| Atomic tasks | 42 |
+| Parallel agents | 1 supervising + 1 sub-agent (WU2 Sortie 8) |
+| Critical path | 6 sorties (1→2→3→4→5→7) |
+| Blocking open questions | 0 |

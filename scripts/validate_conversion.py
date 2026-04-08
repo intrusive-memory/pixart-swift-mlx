@@ -171,7 +171,10 @@ def validate_pixart_dit(
             layer_results.append({"key": mlx_key, "psnr": psnr, "status": status})
 
             if psnr < PER_LAYER_PSNR_THRESHOLD:
-                print(f"  WARNING: {mlx_key} PSNR={psnr:.1f} dB < {PER_LAYER_PSNR_THRESHOLD} dB")
+                print(
+                    f"WARNING: Layer {mlx_key} PSNR={psnr:.1f}dB < 25dB threshold",
+                    file=sys.stderr,
+                )
             elif psnr == float("inf"):
                 print(f"  EXACT:   {mlx_key} (identical)")
             else:
@@ -342,7 +345,10 @@ def validate_t5(
                 layer_results.append({"key": key, "psnr": psnr, "status": status})
 
             if psnr < PER_LAYER_PSNR_THRESHOLD:
-                print(f"  WARNING: {key} PSNR={psnr:.1f} dB")
+                print(
+                    f"WARNING: Layer {key} PSNR={psnr:.1f}dB < 25dB threshold",
+                    file=sys.stderr,
+                )
             elif psnr == float("inf"):
                 print(f"  EXACT:   {key}")
             else:
@@ -440,7 +446,10 @@ def validate_vae(
             layer_results.append({"key": key, "psnr": psnr, "status": status})
 
             if psnr < PER_LAYER_PSNR_THRESHOLD:
-                print(f"  WARNING: {key} PSNR={psnr:.1f} dB")
+                print(
+                    f"WARNING: Layer {key} PSNR={psnr:.1f}dB < 25dB threshold",
+                    file=sys.stderr,
+                )
             elif psnr == float("inf"):
                 print(f"  EXACT:   {key}")
             else:

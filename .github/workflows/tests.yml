@@ -26,16 +26,3 @@ jobs:
             -scheme pixart-swift-mlx-Package \
             -destination 'platform=macOS,arch=arm64'
 
-  build-ios:
-    name: Build for iOS
-    runs-on: macos-26
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Build
-        run: |
-          xcodebuild build \
-            -scheme pixart-swift-mlx-Package \
-            -destination 'platform=iOS Simulator,name=iPhone 17,OS=26.1'
