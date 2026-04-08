@@ -1,4 +1,5 @@
 import Testing
+import TuberiaCatalog
 
 @testable import PixArtBackbone
 
@@ -8,6 +9,24 @@ struct ComponentRegistrationTests {
   @Test("Registration succeeds")
   func registration() {
     #expect(PixArtComponents.registered == true)
+  }
+
+  @Test("DiT component descriptor is non-nil after registration")
+  func ditComponentRegistered() {
+    _ = PixArtComponents.registered
+    #expect(CatalogRegistration.shared.descriptor(for: "pixart-sigma-xl-dit-int4") != nil)
+  }
+
+  @Test("T5 encoder component descriptor is non-nil after registration")
+  func encoderComponentRegistered() {
+    _ = PixArtComponents.registered
+    #expect(CatalogRegistration.shared.descriptor(for: "t5-xxl-encoder-int4") != nil)
+  }
+
+  @Test("SDXL VAE decoder component descriptor is non-nil after registration")
+  func decoderComponentRegistered() {
+    _ = PixArtComponents.registered
+    #expect(CatalogRegistration.shared.descriptor(for: "sdxl-vae-decoder-fp16") != nil)
   }
 
   @Test("allComponentIds from recipe are all 3 expected IDs")

@@ -1,7 +1,7 @@
 import ArgumentParser
 
 @main
-struct PixArtCLI: ParsableCommand {
+struct PixArtCLI: AsyncParsableCommand {
   static let configuration = CommandConfiguration(
     commandName: "pixart",
     abstract: "PixArt-Sigma image generation CLI",

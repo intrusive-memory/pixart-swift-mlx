@@ -57,7 +57,7 @@ This package depends **only** on SwiftTubería (which transitively provides mlx-
 platforms: [.macOS(.v26), .iOS(.v26)]
 ```
 
-PixArt's ~2 GB footprint (int4, all components) makes it viable on M-series iPads. This is a key differentiator from FLUX.2.
+PixArt's ~2 GB footprint (int4, all components) makes it viable on M-series iPads. This is a key differentiator from FLUX.2. **iOS testing is out of scope for this iteration** — no iOS CI job, no iOS-specific tests. Platform declaration is kept to avoid breaking downstream consumers.
 
 ---
 
@@ -203,8 +203,8 @@ struct PixArtRecipe: PipelineRecipe {
 | Configuration | Peak Memory | Strategy |
 |---|---|---|
 | All components loaded (int4) | ~2 GB | Mac with 8+ GB |
-| Two-phase: T5 phase | ~1.4 GB | iPad (8 GB) |
-| Two-phase: DiT + VAE phase | ~500 MB | iPad (8 GB) |
+| Two-phase: T5 phase | ~1.4 GB | Future iOS (deferred) |
+| Two-phase: DiT + VAE phase | ~500 MB | Future iOS (deferred) |
 
 ---
 
@@ -317,9 +317,8 @@ Internally, the CLI assembles the PixArt pipeline recipe and calls `pipeline.gen
 - Prompt → CGImage (correct dimensions, non-zero pixels)
 - Seed reproducibility:
   - Same device, same seed → PSNR > 40 dB between runs ("visually identical")
-  - Cross-platform (macOS vs iPadOS, different M-series) → PSNR > 30 dB
   - Byte-for-byte reproduction is NOT guaranteed (MLX makes no such promise)
-- Two-phase loading on memory-constrained simulated budget
+- Two-phase loading (encoder phase + DiT/VAE phase) — macOS only; iPad validation is deferred
 
 ### P9.3 What Is NOT Tested Here
 - T5XXLEncoder correctness (tested in SwiftTubería catalog tests)

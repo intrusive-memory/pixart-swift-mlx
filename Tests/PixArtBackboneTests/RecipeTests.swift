@@ -43,6 +43,40 @@ struct RecipeTests {
     }
   }
 
+  @Test("Encoder maxSequenceLength is 120")
+  func encoderMaxSequenceLength() {
+    let recipe = PixArtRecipe()
+    #expect(recipe.encoderConfig.maxSequenceLength == 120)
+  }
+
+  @Test("Encoder embeddingDim is 4096")
+  func encoderEmbeddingDim() {
+    let recipe = PixArtRecipe()
+    #expect(recipe.encoderConfig.embeddingDim == 4096)
+  }
+
+  @Test("Scheduler beta schedule: linear betaStart=0.0001, betaEnd=0.02")
+  func schedulerBetaSchedule() {
+    let recipe = PixArtRecipe()
+    if case .linear(let betaStart, let betaEnd) = recipe.schedulerConfig.betaSchedule {
+      #expect(abs(betaStart - 0.0001) < 1e-7)
+      #expect(abs(betaEnd - 0.02) < 1e-7)
+    } else {
+      Issue.record("Expected .linear beta schedule, got a different schedule type")
+    }
+  }
+
+  @Test("allComponentIds is exactly [t5-xxl-encoder-int4, pixart-sigma-xl-dit-int4, sdxl-vae-decoder-fp16]")
+  func componentIdsExactOrder() {
+    let recipe = PixArtRecipe()
+    #expect(
+      recipe.allComponentIds == [
+        "t5-xxl-encoder-int4",
+        "pixart-sigma-xl-dit-int4",
+        "sdxl-vae-decoder-fp16",
+      ])
+  }
+
   @Test("Shape contract: encoder embeddingDim matches backbone captionChannels")
   func encoderBackboneContract() {
     let recipe = PixArtRecipe()

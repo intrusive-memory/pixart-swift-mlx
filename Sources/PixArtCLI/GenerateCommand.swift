@@ -5,7 +5,7 @@ import ImageIO
 import PixArtBackbone
 import Tuberia
 
-struct GenerateCommand: ParsableCommand {
+struct GenerateCommand: AsyncParsableCommand {
   static let configuration = CommandConfiguration(
     commandName: "generate",
     abstract: "Generate an image from a text prompt"
@@ -21,7 +21,7 @@ struct GenerateCommand: ParsableCommand {
   var height: Int = 1024
 
   @Option(name: .long, help: "Output file path")
-  var output: String = "output.png"
+  var output: String = "image.png"
 
   @Option(name: .long, help: "Number of denoising steps")
   var steps: Int = PixArtRecipe.defaultSteps
@@ -32,7 +32,7 @@ struct GenerateCommand: ParsableCommand {
   @Option(name: .long, help: "Random seed for reproducible generation")
   var seed: UInt32?
 
-  func run() throws {
+  mutating func run() async throws {
     _ = PixArtComponents.registered
 
     let request = DiffusionGenerationRequest(
@@ -48,26 +48,24 @@ struct GenerateCommand: ParsableCommand {
     print("Size: \(width)x\(height), steps: \(steps), guidance: \(guidance)")
     if let seed { print("Seed: \(seed)") }
 
-    let result = try runAsync {
-      let pipeline = try DiffusionPipeline(recipe: PixArtRecipe())
-      try await pipeline.loadModels { fraction, component in
-        print("Loading \(component): \(Int(fraction * 100))%")
-      }
-      return try await pipeline.generate(request: request) { progress in
-        switch progress {
-        case .encoding(let fraction):
-          print("Encoding: \(Int(fraction * 100))%")
-        case .generating(let step, let total, _):
-          print("Step \(step)/\(total)")
-        case .decoding:
-          print("Decoding latents...")
-        case .rendering:
-          print("Rendering image...")
-        case .complete(let duration):
-          print(String(format: "Done in %.1fs", duration))
-        default:
-          break
-        }
+    let pipeline = try DiffusionPipeline(recipe: PixArtRecipe())
+    try await pipeline.loadModels { fraction, component in
+      print("Loading \(component): \(Int(fraction * 100))%")
+    }
+    let result = try await pipeline.generate(request: request) { progress in
+      switch progress {
+      case .encoding(let fraction):
+        print("Encoding: \(Int(fraction * 100))%")
+      case .generating(let step, let total, _):
+        print("Step \(step)/\(total)")
+      case .decoding:
+        print("Decoding latents...")
+      case .rendering:
+        print("Rendering image...")
+      case .complete(let duration):
+        print(String(format: "Done in %.1fs", duration))
+      default:
+        break
       }
     }
 

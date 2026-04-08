@@ -156,7 +156,7 @@ struct BackboneForwardTests {
     let dit = try PixArtDiT(configuration: PixArtDiTConfiguration())
 
     // Mask: first 60 tokens valid, last 60 are padding
-    var maskData = [Int32](repeating: 1, count: 60) + [Int32](repeating: 0, count: 60)
+    let maskData = [Int32](repeating: 1, count: 60) + [Int32](repeating: 0, count: 60)
     let mask = MLXArray(maskData).reshaped(1, 120)
 
     let input = BackboneInput(
@@ -190,5 +190,46 @@ struct BackboneForwardTests {
 
     // The protocol property and the actual output channel count must agree
     #expect(output.dim(3) == dit.outputLatentChannels)
+  }
+
+  // MARK: - Full 1024×1024 Latent Shape
+
+  /// Verifies the forward pass with the canonical 1024×1024 VAE latent shape.
+  ///
+  /// A 1024×1024 image is encoded by the SDXL VAE at 8× downsampling, producing
+  /// a [1, 128, 128, 4] latent tensor. The DiT backbone must accept this shape
+  /// and return an output of the same spatial dimensions with 4 channels.
+  ///
+  /// Grid: 128/2 = 64 × 64 = 4096 tokens through 28 DiT blocks.
+  /// This test is deliberately marked `.timeLimit(.minutes(5))` since it processes
+  /// 4096 tokens with zero weights — fast on Apple Silicon but non-trivial.
+  @Test(
+    "Forward pass with [1, 128, 128, 4] latent produces [1, 128, 128, 4] output",
+    .timeLimit(.minutes(5))
+  )
+  func forwardPassWith1024LatentShape() throws {
+    let config = PixArtDiTConfiguration()
+    let dit = try PixArtDiT(configuration: config)
+
+    // Canonical 1024×1024 VAE latent (SDXL 8× downsampling: 1024/8 = 128)
+    let latents = MLXArray.zeros([1, 128, 128, 4])
+    // Full T5-XXL conditioning: 120 tokens × 4096 embedding dim
+    let conditioning = MLXArray.zeros([1, 120, 4096])
+    let conditioningMask = MLXArray.ones([1, 120])
+    // Single timestep per batch element
+    let timestep = MLXArray([500 as Float])
+
+    let input = BackboneInput(
+      latents: latents,
+      conditioning: conditioning,
+      conditioningMask: conditioningMask,
+      timestep: timestep
+    )
+
+    let output = try dit.forward(input)
+    eval(output)
+
+    // Output must have the same spatial dimensions as the input latent
+    #expect(output.shape == [1, 128, 128, 4])
   }
 }
