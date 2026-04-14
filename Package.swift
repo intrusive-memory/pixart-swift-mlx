@@ -19,7 +19,8 @@ let package = Package(
     ),
   ],
   dependencies: [
-    .package(url: "https://github.com/intrusive-memory/SwiftTuberia.git", from: "0.2.8"),
+    // LOCAL: adding scaledLinear beta schedule — revert to remote after release
+    .package(path: "../SwiftTuberia"),
     .package(url: "https://github.com/apple/swift-argument-parser", from: "1.3.0"),
   ],
   targets: [

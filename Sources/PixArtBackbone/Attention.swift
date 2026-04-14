@@ -4,10 +4,9 @@ import MLXNN
 
 // MARK: - Self-Attention
 
-/// Multi-head self-attention with QK normalization (PixArt-Sigma enables this).
+/// Multi-head self-attention without QK normalization.
 ///
-/// Separate Q, K, V projections (matching diffusers weight format).
-/// After reshape to multi-head form, LayerNorm is applied to Q and K.
+/// The PixArt-Sigma XL int4 checkpoint has no q_norm/k_norm weights.
 ///
 /// Input: [B, T, C] -> Output: [B, T, C]
 final class SelfAttention: Module, @unchecked Sendable {
@@ -15,8 +14,6 @@ final class SelfAttention: Module, @unchecked Sendable {
   @ModuleInfo(key: "to_k") var toK: Linear
   @ModuleInfo(key: "to_v") var toV: Linear
   @ModuleInfo(key: "to_out") var toOut: Linear
-  @ModuleInfo(key: "q_norm") var qNorm: LayerNorm
-  @ModuleInfo(key: "k_norm") var kNorm: LayerNorm
 
   let numHeads: Int
   let headDim: Int
@@ -31,8 +28,6 @@ final class SelfAttention: Module, @unchecked Sendable {
     self._toK.wrappedValue = Linear(hiddenSize, hiddenSize)
     self._toV.wrappedValue = Linear(hiddenSize, hiddenSize)
     self._toOut.wrappedValue = Linear(hiddenSize, hiddenSize)
-    self._qNorm.wrappedValue = LayerNorm(dimensions: headDim, eps: 1e-6)
-    self._kNorm.wrappedValue = LayerNorm(dimensions: headDim, eps: 1e-6)
   }
 
   /// - Parameter x: Input tensor of shape [B, T, C].
@@ -51,9 +46,9 @@ final class SelfAttention: Module, @unchecked Sendable {
     k = k.reshaped(B, T, numHeads, headDim).transposed(0, 2, 1, 3)
     let vReshaped = v.reshaped(B, T, numHeads, headDim).transposed(0, 2, 1, 3)
 
-    // QK normalization (PixArt-Sigma specific)
-    q = qNorm(q)
-    k = kNorm(k)
+    // No QK normalization: the PixArt-Sigma XL checkpoint has no q_norm/k_norm weights.
+    // Applying default-initialized LayerNorm(weight=1,bias=0) would change the attention
+    // distribution vs the trained model.
 
     // Scaled dot-product attention: [B, numHeads, T, headDim]
     let attnOut = MLXFast.scaledDotProductAttention(

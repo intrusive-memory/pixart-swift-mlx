@@ -58,8 +58,13 @@ func get2DSinusoidalPositionEmbeddings(
 
 /// Computes 1D sinusoidal embeddings for a set of positions.
 ///
-/// Uses the standard sinusoidal formula: frequencies = 1 / 10000^(2i/d).
-/// Output: [cos(pos * freq_0), cos(pos * freq_1), ..., sin(pos * freq_0), sin(pos * freq_1), ...]
+/// Matches the diffusers `get_1d_sincos_pos_embed_from_grid_np` formula:
+///   omega = arange(D/2) / (D/2)
+///   freqs = 1 / 10000^omega = exp(-log(10000) * i / (D/2))
+///   angles = pos * freqs
+///   embedding = [sin(angles), cos(angles)]   ← sin FIRST, matching diffusers
+///
+/// The output order is [sin, cos] to match how PixArt-Sigma was trained.
 ///
 /// - Parameters:
 ///   - positions: 1D array of position values, shape [N].
@@ -74,17 +79,25 @@ func sinusoidalEmbedding1D(positions: MLXArray, dim: Int) -> MLXArray {
   // positions: [N], freqs: [halfDim] -> outer product: [N, halfDim]
   let angles = positions.expandedDimensions(axis: -1) * freqs.expandedDimensions(axis: 0)
 
-  // Concatenate cos and sin: [N, dim]
-  return concatenated([MLX.cos(angles), MLX.sin(angles)], axis: -1)
+  // Concatenate sin and cos: [N, dim] — sin FIRST to match diffusers convention
+  return concatenated([MLX.sin(angles), MLX.cos(angles)], axis: -1)
 }
 
 // MARK: - Timestep Sinusoidal Embedding
 
 /// Computes sinusoidal embedding for diffusion timesteps.
 ///
-/// Input: scalar timestep t, shape [B]
-/// freqs = exp(-log(10000) * arange(128) / 128)
-/// embedding = [cos(t * freqs), sin(t * freqs)]  → [B, 256]
+/// Matches the diffusers `get_timestep_embedding` formula exactly:
+///   exponent = -log(10000) * arange(0, halfDim) / (halfDim - downscale_freq_shift)
+///   freqs = exp(exponent)
+///   angles = timestep * freqs
+///   embedding = [sin(angles), cos(angles)]   ← sin FIRST, matching diffusers default
+///
+/// PixArt-Sigma uses `downscale_freq_shift=1` (the diffusers default), meaning the
+/// denominator is `(halfDim - 1)` not `halfDim`. This ensures frequencies span
+/// exactly [1, 1/10000] rather than [1, 10000^(-127/128)].
+///
+/// Output order is [sin, cos] to match the order the timestep MLP weights were trained on.
 ///
 /// - Parameters:
 ///   - timestep: Timestep values, shape [B].
@@ -94,13 +107,16 @@ func timestepSinusoidalEmbedding(_ timestep: MLXArray, dim: Int = 256) -> MLXArr
   let halfDim = dim / 2
   let logBase: Float = Foundation.log(10000.0)
   let indices = MLXArray(0..<halfDim).asType(.float32)
-  let freqs = MLX.exp(-logBase * indices / Float(halfDim))  // [halfDim]
+  // Denominator is (halfDim - 1) matching diffusers downscale_freq_shift=1
+  let freqs = MLX.exp(-logBase * indices / Float(halfDim - 1))  // [halfDim]
 
   // timestep: [B], freqs: [halfDim] -> [B, halfDim]
-  let angles = timestep.expandedDimensions(axis: -1) * freqs.expandedDimensions(axis: 0)
+  // Cast timestep to float32 to avoid int32 * float16 precision issues
+  let angles =
+    timestep.asType(.float32).expandedDimensions(axis: -1) * freqs.expandedDimensions(axis: 0)
 
-  // [B, dim]
-  return concatenated([MLX.cos(angles), MLX.sin(angles)], axis: -1)
+  // [B, dim]: sin FIRST, then cos — matching diffusers get_timestep_embedding output order
+  return concatenated([MLX.sin(angles), MLX.cos(angles)], axis: -1)
 }
 
 // MARK: - Timestep MLP

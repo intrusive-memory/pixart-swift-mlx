@@ -62,12 +62,13 @@ public struct PixArtRecipe: PipelineRecipe, Sendable {
 
   /// DPM-Solver++ scheduler configuration.
   ///
-  /// PixArt-Sigma uses a standard linear beta schedule — NOT shifted cosine.
-  /// The SNR-shift code exists in the training codebase but is disabled for
-  /// the released weights. See ARCHITECTURE_STANDALONE.md A4.1 and errata A7.
+  /// PixArt-Sigma was trained with the HuggingFace `"scaled_linear"` beta schedule:
+  ///   betas = linspace(sqrt(0.0001), sqrt(0.02), 1000)²
+  /// Using plain `linear` produces wrong alphas_cumprod values which cause the
+  /// denoising trajectory to diverge (latents drift toward large positive values).
   public var schedulerConfig: DPMSolverSchedulerConfiguration {
     DPMSolverSchedulerConfiguration(
-      betaSchedule: .linear(betaStart: 0.0001, betaEnd: 0.02),
+      betaSchedule: .scaledLinear(betaStart: 0.0001, betaEnd: 0.02),
       predictionType: .epsilon,
       solverOrder: 2,
       trainTimesteps: 1000

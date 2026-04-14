@@ -1,11 +1,12 @@
 @preconcurrency import MLX
 import MLXNN
 
-// MARK: - GEGLU Feed-Forward Network
+// MARK: - GELU Feed-Forward Network
 
-/// GEGLU FFN: fc1 projects to 2 * ffnDim, splits for gate * value, then fc2 projects back.
+/// GELU FFN: fc1 projects to ffnDim with GELU(tanh) activation, fc2 projects back.
 ///
-/// Uses GELU(tanh) approximation for the gating activation.
+/// PixArt-Sigma uses activation_fn="gelu-approximate" (not GEGLU), so fc1 projects to
+/// ffnDim (not 2*ffnDim) and GELU is applied directly — no gate/value split.
 ///
 /// Input: [B, T, C] -> Output: [B, T, C]
 final class GEGLUFFN: Module, @unchecked Sendable {
@@ -13,28 +14,24 @@ final class GEGLUFFN: Module, @unchecked Sendable {
   @ModuleInfo var fc2: Linear
 
   init(hiddenSize: Int, ffnHiddenSize: Int) {
-    // fc1 projects to 2 * ffnHiddenSize for GEGLU split
-    self._fc1.wrappedValue = Linear(hiddenSize, 2 * ffnHiddenSize)
+    // fc1 projects to ffnHiddenSize (GELU activation, no split)
+    self._fc1.wrappedValue = Linear(hiddenSize, ffnHiddenSize)
     self._fc2.wrappedValue = Linear(ffnHiddenSize, hiddenSize)
   }
 
   func callAsFunction(_ x: MLXArray) -> MLXArray {
-    // Project to 2 * ffnHiddenSize: [B, T, 2 * ffnDim]
-    let projected = fc1(x)
+    // Project to ffnHiddenSize: [B, T, ffnDim]
+    var projected = fc1(x)
 
-    // Split into gate and value along last dimension
-    let chunks = projected.split(parts: 2, axis: -1)
-    let gate = chunks[0]  // [B, T, ffnDim]
-    let value = chunks[1]  // [B, T, ffnDim]
-
-    // GEGLU: GELU(tanh)(gate) * value
+    // GELU(tanh approximation)
     // geluApproximate uses compile(shapeless:true) which can return 0-D tensors under
     // memory pressure. Replace with direct gelu_new (tanh approximation) math.
-    let activated =
-      gate * 0.5 * (1.0 + MLX.tanh(0.7978845608 * (gate + 0.044715 * gate * gate * gate))) * value
+    projected =
+      projected * 0.5
+      * (1.0 + MLX.tanh(0.7978845608 * (projected + 0.044715 * projected * projected * projected)))
 
     // Project back: [B, T, hiddenSize]
-    return fc2(activated)
+    return fc2(projected)
   }
 }
 

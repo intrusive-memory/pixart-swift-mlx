@@ -148,23 +148,10 @@ public final class PixArtDiT: Module, Backbone, @unchecked Sendable {
     // Stage 2: MLP projection [B, 256] -> [B, 1152]
     var t = timestepEmbedder(tEmb)
 
-    // Stage 3: Add micro-conditions (resolution + aspect ratio)
-    // For inference, use the target spatial dimensions as micro-conditions
-    let targetH = Float(spatialH * 8)  // Full pixel height
-    let targetW = Float(spatialW * 8)  // Full pixel width
-    let ar = targetH / targetW
-
-    let sizeInput = MLXArray([targetH, targetW]).reshaped(1, 2)
-    let sizeInputBroadcast = MLX.broadcast(sizeInput, to: [B, 2])
-    let sizeEmb = sizeEmbedder(sizeInputBroadcast)  // [B, 768]
-
-    let arInput = MLXArray([ar]).reshaped(1)
-    let arInputBroadcast = MLX.broadcast(arInput, to: [B])
-    let arEmb = arEmbedder(arInputBroadcast)  // [B, 384]
-
-    // Concatenate micro-conditions: [B, 768] + [B, 384] = [B, 1152]
-    let microCond = concatenated([sizeEmb, arEmb], axis: -1)
-    t = t + microCond
+    // Stage 3: Micro-conditions (resolution + aspect ratio) are NOT included in the
+    // int4-quantized safetensors — the sizeEmbedder and arEmbedder weights are absent,
+    // meaning micro-conditioning was omitted from the weight conversion.
+    // Skip adding micro-conditions: t remains as timestepEmbedder(tEmb).
 
     // Stage 4: t_block: SiLU -> Linear(1152, 6*1152) = [B, 6912]
     // silu uses compile(shapeless:true) which can return 0-D tensors under memory pressure.
@@ -200,8 +187,58 @@ public final class PixArtDiT: Module, Backbone, @unchecked Sendable {
   public var currentWeights: Tuberia.ModuleParameters? { weights }
 
   public func apply(weights: Tuberia.ModuleParameters) throws {
-    let mlxParams = MLXNN.ModuleParameters.unflattened(weights.parameters)
+    // Dequantize any packed int4 weight tensors before loading.
+    //
+    // The int4-quantized safetensors stores Linear weight tensors as:
+    //   - <key>.weight  — U32 packed, shape [outDim, inDim/8]
+    //   - <key>.scales  — F16, shape [outDim, numGroups]  (numGroups = inDim/64)
+    //   - <key>.biases  — F16, shape [outDim, numGroups]  (zero-point = min value)
+    //
+    // Standard Linear layers require float weight of shape [outDim, inDim].
+    // We dequantize at load time: floatWeight = packed_values * scales + biases
+    //
+    // Keys ending in .scales or .biases (quantization parameters) are skipped
+    // since Linear has no such parameters. The additive layer bias (.bias, singular)
+    // is loaded as-is.
+    var params: [String: MLXArray] = [:]
+    var scalesMap: [String: MLXArray] = [:]
+    var biasesMap: [String: MLXArray] = [:]
+
+    // First pass: collect scales and biases (quantization zero-points)
+    for (key, tensor) in weights.parameters {
+      if key.hasSuffix(".scales") {
+        let base = String(key.dropLast(".scales".count))
+        scalesMap[base] = tensor
+      } else if key.hasSuffix(".biases") {
+        let base = String(key.dropLast(".biases".count))
+        biasesMap[base] = tensor
+      }
+    }
+
+    // Second pass: dequantize weight tensors and pass through others
+    for (key, tensor) in weights.parameters {
+      // Skip quantization sidecar keys (handled via scalesMap/biasesMap)
+      if key.hasSuffix(".scales") || key.hasSuffix(".biases") {
+        continue
+      }
+
+      // Check if this weight has quantization sidecars (it's a packed int4 weight)
+      if key.hasSuffix(".weight"), let scales = scalesMap[String(key.dropLast(".weight".count))],
+        let biases = biasesMap[String(key.dropLast(".weight".count))], tensor.dtype == .uint32
+      {
+        // Dequantize: floatWeight[i, j] = packed_values[i, j] * scales[i, g] + biases[i, g]
+        // where g = j / groupSize
+        let floatWeight = dequantized(
+          tensor, scales: scales, biases: biases, groupSize: 64, bits: 4)
+        params[key] = floatWeight.asType(.float16)
+      } else {
+        params[key] = tensor
+      }
+    }
+
+    let mlxParams = MLXNN.ModuleParameters.unflattened(params)
     self.update(parameters: mlxParams)
+
     self.weights = weights
     self.isLoaded = true
   }
