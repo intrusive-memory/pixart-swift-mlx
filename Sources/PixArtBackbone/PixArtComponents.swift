@@ -43,6 +43,21 @@ public enum PixArtComponents {
         sha256Checksums: nil  // Populated after weight conversion
       ))
 
+    // PixArt-Sigma XL DiT (fp16) — mixed-precision test component
+    // Weights produced by scripts/dequantize_dit_to_fp16.py from the int4 safetensors.
+    // Used to isolate whether int4 quantization errors cause the blue/cyan mosaic artifact.
+    // HuggingFace repo is a placeholder; for local testing weights live at:
+    //   /tmp/vinetas-test-models/pixart-sigma-xl-dit-fp16/
+    registry.register(
+      ComponentDescriptor(
+        componentId: "pixart-sigma-xl-dit-fp16",
+        componentType: .backbone,
+        huggingFaceRepo: "intrusive-memory/pixart-sigma-xl-dit-fp16-mlx",
+        filePatterns: ["*.safetensors", "config.json"],
+        estimatedSizeBytes: 1_258_291_200,  // ~1.2 GB fp16
+        sha256Checksums: nil
+      ))
+
     // T5-XXL Encoder (int4) — catalog component, authoritative in SwiftTubería.
     // Re-registered here for safety; CatalogRegistration deduplicates by ID.
     registry.register(

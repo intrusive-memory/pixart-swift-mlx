@@ -146,7 +146,7 @@ public final class PixArtDiT: Module, Backbone, @unchecked Sendable {
     let tEmb = timestepSinusoidalEmbedding(timestep)
 
     // Stage 2: MLP projection [B, 256] -> [B, 1152]
-    var t = timestepEmbedder(tEmb)
+    let t = timestepEmbedder(tEmb)
 
     // Stage 3: Micro-conditions (resolution + aspect ratio) are NOT included in the
     // int4-quantized safetensors — the sizeEmbedder and arEmbedder weights are absent,
@@ -187,24 +187,24 @@ public final class PixArtDiT: Module, Backbone, @unchecked Sendable {
   public var currentWeights: Tuberia.ModuleParameters? { weights }
 
   public func apply(weights: Tuberia.ModuleParameters) throws {
-    // Dequantize any packed int4 weight tensors before loading.
+    // Load weight tensors into the model, handling both int4-quantized and fp16 safetensors.
     //
-    // The int4-quantized safetensors stores Linear weight tensors as:
+    // INT4 safetensors (pixart-sigma-xl-dit-int4):
     //   - <key>.weight  — U32 packed, shape [outDim, inDim/8]
     //   - <key>.scales  — F16, shape [outDim, numGroups]  (numGroups = inDim/64)
     //   - <key>.biases  — F16, shape [outDim, numGroups]  (zero-point = min value)
+    //   These are dequantized at load time: floatWeight = packed_values * scales + biases
     //
-    // Standard Linear layers require float weight of shape [outDim, inDim].
-    // We dequantize at load time: floatWeight = packed_values * scales + biases
+    // FP16 safetensors (pixart-sigma-xl-dit-fp16, produced by dequantize_dit_to_fp16.py):
+    //   - <key>.weight  — F16, shape [outDim, inDim]
+    //   No .scales or .biases keys present. Load directly without dequantization.
     //
-    // Keys ending in .scales or .biases (quantization parameters) are skipped
-    // since Linear has no such parameters. The additive layer bias (.bias, singular)
-    // is loaded as-is.
+    // The additive layer bias (.bias, singular) is always loaded as-is regardless of format.
     var params: [String: MLXArray] = [:]
     var scalesMap: [String: MLXArray] = [:]
     var biasesMap: [String: MLXArray] = [:]
 
-    // First pass: collect scales and biases (quantization zero-points)
+    // First pass: collect scales and biases (quantization zero-points, int4 only)
     for (key, tensor) in weights.parameters {
       if key.hasSuffix(".scales") {
         let base = String(key.dropLast(".scales".count))
@@ -215,23 +215,27 @@ public final class PixArtDiT: Module, Backbone, @unchecked Sendable {
       }
     }
 
-    // Second pass: dequantize weight tensors and pass through others
+    // Second pass: dequantize int4 weight tensors or pass through fp16 weights unchanged
     for (key, tensor) in weights.parameters {
-      // Skip quantization sidecar keys (handled via scalesMap/biasesMap)
+      // Skip quantization sidecar keys (handled via scalesMap/biasesMap above)
       if key.hasSuffix(".scales") || key.hasSuffix(".biases") {
         continue
       }
 
-      // Check if this weight has quantization sidecars (it's a packed int4 weight)
-      if key.hasSuffix(".weight"), let scales = scalesMap[String(key.dropLast(".weight".count))],
-        let biases = biasesMap[String(key.dropLast(".weight".count))], tensor.dtype == .uint32
+      let base = String(key.dropLast(".weight".count))
+      if key.hasSuffix(".weight"),
+        let scales = scalesMap[base],
+        let biases = biasesMap[base],
+        tensor.dtype == .uint32
       {
-        // Dequantize: floatWeight[i, j] = packed_values[i, j] * scales[i, g] + biases[i, g]
+        // INT4 path: dequantize packed uint32 to float16
+        // floatWeight[i, j] = packed_values[i, j] * scales[i, g] + biases[i, g]
         // where g = j / groupSize
         let floatWeight = dequantized(
           tensor, scales: scales, biases: biases, groupSize: 64, bits: 4)
         params[key] = floatWeight.asType(.float16)
       } else {
+        // FP16 path (or any non-quantized tensor): load directly
         params[key] = tensor
       }
     }

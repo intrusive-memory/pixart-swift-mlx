@@ -50,7 +50,9 @@ func get2DSinusoidalPositionEmbeddings(
   let embedWTiled = MLX.broadcast(embedWExpanded, to: [gridH, gridW, halfDim])
 
   // Concatenate along embedding dimension: [gridH, gridW, hiddenSize]
-  let posEmbed = concatenated([embedHTiled, embedWTiled], axis: -1)
+  // Reference diffusers order: W embedding first, H embedding second
+  // (meshgrid(grid_w, grid_h) → grid[0]=W coords, grid[1]=H coords → [sincos(W), sincos(H)])
+  let posEmbed = concatenated([embedWTiled, embedHTiled], axis: -1)
 
   // Flatten spatial dims and add batch dim: [1, gridH * gridW, hiddenSize]
   return posEmbed.reshaped(1, gridH * gridW, hiddenSize)
@@ -87,17 +89,22 @@ func sinusoidalEmbedding1D(positions: MLXArray, dim: Int) -> MLXArray {
 
 /// Computes sinusoidal embedding for diffusion timesteps.
 ///
-/// Matches the diffusers `get_timestep_embedding` formula exactly:
+/// Matches the diffusers `get_timestep_embedding` formula for PixArt-Sigma exactly:
 ///   exponent = -log(10000) * arange(0, halfDim) / (halfDim - downscale_freq_shift)
 ///   freqs = exp(exponent)
 ///   angles = timestep * freqs
-///   embedding = [sin(angles), cos(angles)]   ← sin FIRST, matching diffusers default
+///   embedding = [cos(angles), sin(angles)]   ← cos FIRST (flip_sin_to_cos=True)
 ///
-/// PixArt-Sigma uses `downscale_freq_shift=1` (the diffusers default), meaning the
-/// denominator is `(halfDim - 1)` not `halfDim`. This ensures frequencies span
-/// exactly [1, 1/10000] rather than [1, 10000^(-127/128)].
+/// PixArt-Sigma's `PixArtAlphaCombinedTimestepSizeEmbeddings.time_proj` is constructed with
+/// `Timesteps(num_channels=256, flip_sin_to_cos=True, downscale_freq_shift=0)`:
+///   - `downscale_freq_shift=0` → denominator is `halfDim` (NOT `halfDim - 1`)
+///   - `flip_sin_to_cos=True` → output is `[cos, sin]` (NOT `[sin, cos]`)
+/// See diffusers `embeddings.py` class `PixArtAlphaCombinedTimestepSizeEmbeddings` (line 2173)
+/// and `get_timestep_embedding` (line 72-73: `if flip_sin_to_cos: emb = cat([emb[:, half_dim:], emb[:, :half_dim]])`).
 ///
-/// Output order is [sin, cos] to match the order the timestep MLP weights were trained on.
+/// Using the wrong denominator or the wrong sin/cos order causes the timestep MLP to
+/// receive an embedding whose frequency channels don't align with its trained weights,
+/// which degrades denoising quality even though the overall magnitude looks reasonable.
 ///
 /// - Parameters:
 ///   - timestep: Timestep values, shape [B].
@@ -107,16 +114,17 @@ func timestepSinusoidalEmbedding(_ timestep: MLXArray, dim: Int = 256) -> MLXArr
   let halfDim = dim / 2
   let logBase: Float = Foundation.log(10000.0)
   let indices = MLXArray(0..<halfDim).asType(.float32)
-  // Denominator is (halfDim - 1) matching diffusers downscale_freq_shift=1
-  let freqs = MLX.exp(-logBase * indices / Float(halfDim - 1))  // [halfDim]
+  // downscale_freq_shift=0 for PixArt-Sigma → denominator is halfDim
+  let freqs = MLX.exp(-logBase * indices / Float(halfDim))  // [halfDim]
 
   // timestep: [B], freqs: [halfDim] -> [B, halfDim]
   // Cast timestep to float32 to avoid int32 * float16 precision issues
   let angles =
     timestep.asType(.float32).expandedDimensions(axis: -1) * freqs.expandedDimensions(axis: 0)
 
-  // [B, dim]: sin FIRST, then cos — matching diffusers get_timestep_embedding output order
-  return concatenated([MLX.sin(angles), MLX.cos(angles)], axis: -1)
+  // flip_sin_to_cos=True for PixArt-Sigma → [cos, sin] (NOT [sin, cos]).
+  // Diffusers get_timestep_embedding first builds [sin, cos] then swaps halves → [cos, sin].
+  return concatenated([MLX.cos(angles), MLX.sin(angles)], axis: -1)
 }
 
 // MARK: - Timestep MLP

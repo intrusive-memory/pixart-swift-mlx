@@ -24,7 +24,16 @@ public struct PixArtDiTConfiguration: Sendable {
   public let maxTextLength: Int
   /// Position embedding interpolation factor for PixArt-Sigma XL. Default: 2.
   public let peInterpolation: Float
-  /// Base resolution used for position embedding normalization. Default: 512.
+  /// Base **latent** resolution used for position embedding normalization. Default: 128.
+  ///
+  /// PixArt-Sigma was trained at 1024×1024 pixel resolution. After the VAE (8× downscale)
+  /// the latent size is 128. `PixArtDiT.forward` divides by `patchSize` to reach the grid
+  /// `base_size = sample_size // patch_size = 64`, matching diffusers'
+  /// `PixArtTransformer2DModel.base_size`.
+  ///
+  /// Using 512 here (the previous value) multiplied position coordinates by 4 relative
+  /// to the trained base grid, producing out-of-distribution sinusoidal frequencies and
+  /// systematically corrupting spatial attention across all 28 blocks.
   public let baseSize: Int
 
   public init(
@@ -39,7 +48,7 @@ public struct PixArtDiTConfiguration: Sendable {
     captionChannels: Int = 4096,
     maxTextLength: Int = 120,
     peInterpolation: Float = 2.0,
-    baseSize: Int = 512
+    baseSize: Int = 128
   ) {
     self.hiddenSize = hiddenSize
     self.numHeads = numHeads

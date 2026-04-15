@@ -1,27 +1,29 @@
 import Tuberia
 import TuberiaCatalog
 
-// MARK: - PixArt-Sigma Pipeline Recipe
+// MARK: - PixArt-Sigma FP16 Pipeline Recipe
 
-/// Pipeline recipe connecting PixArt-Sigma components:
+/// Mixed-precision pipeline recipe for diagnosing int4 quantization artifacts.
 ///
-/// ```
-/// T5XXLEncoder → PixArtDiT → SDXLVAEDecoder → ImageRenderer
-///                    ↑
-///             DPMSolverScheduler
-/// ```
+/// Identical to ``PixArtRecipe`` except the backbone uses the fp16 DiT weights
+/// (`pixart-sigma-xl-dit-fp16`) instead of the int4 weights (`pixart-sigma-xl-dit-int4`).
 ///
-/// Default generation parameters:
-/// - Steps: 20
-/// - Guidance scale: 4.5
-/// - Beta schedule: linear (betaStart=0.0001, betaEnd=0.02) — NOT shifted cosine
-/// - Prediction type: epsilon (model predicts noise)
+/// The fp16 weights are produced by ``scripts/dequantize_dit_to_fp16.py``, which
+/// dequantizes the int4 safetensors back to float16. This gives the ORIGINAL fp16
+/// values (before any quantization was applied), not just dequantized-from-int4 values.
 ///
-/// Memory profiles (int4 quantized):
-/// - All components loaded simultaneously: ~2 GB (Mac with 8+ GB unified memory)
-/// - Two-phase T5 phase: ~1.4 GB (iPad 8 GB viable)
-/// - Two-phase DiT+VAE phase: ~500 MB (iPad 8 GB viable)
-public struct PixArtRecipe: PipelineRecipe, Sendable {
+/// **Purpose**: If the blue/cyan mosaic artifact disappears with fp16 weights but
+/// persists with int4 weights, that confirms int4 quantization errors accumulating
+/// across 28 DiT blocks are the root cause of the color bias.
+///
+/// **Usage**:
+/// 1. Run `python3 scripts/dequantize_dit_to_fp16.py` to produce the fp16 safetensors.
+/// 2. Run `make test-fixtures-fp16` to generate a fixture using this recipe.
+/// 3. Compare `pixart-seed42-fp16.png` against `pixart-seed42.png` (int4 baseline).
+///
+/// Memory profile: ~2.5 GB (fp16 DiT ~1.2 GB + int4 T5 ~1.2 GB + fp16 VAE ~160 MB).
+/// Requires a machine with ≥16 GB unified memory.
+public struct PixArtFP16Recipe: PipelineRecipe, Sendable {
 
   // MARK: - Associated Types
 
@@ -37,19 +39,15 @@ public struct PixArtRecipe: PipelineRecipe, Sendable {
 
   // MARK: - Default Generation Parameters
 
-  /// Default number of denoising steps.
+  /// Default number of denoising steps (same as int4 recipe).
   public static let defaultSteps: Int = 20
 
-  /// Default classifier-free guidance scale.
+  /// Default classifier-free guidance scale (same as int4 recipe).
   public static let defaultGuidanceScale: Float = 4.5
 
   // MARK: - Encoder Configuration
 
-  /// T5-XXL encoder configuration.
-  ///
-  /// - componentId: "t5-xxl-encoder-int4" — Acervo ID for weights + tokenizer
-  /// - maxSequenceLength: 120 — matches PixArt-Sigma training setup (not T5's max 512)
-  /// - embeddingDim: 4096 — T5-XXL hidden dimension
+  /// T5-XXL encoder configuration (same as int4 recipe — encoder stays int4).
   public var encoderConfig: T5XXLEncoderConfiguration {
     T5XXLEncoderConfiguration(
       componentId: "t5-xxl-encoder-int4",
@@ -60,12 +58,7 @@ public struct PixArtRecipe: PipelineRecipe, Sendable {
 
   // MARK: - Scheduler Configuration
 
-  /// DPM-Solver++ scheduler configuration.
-  ///
-  /// NOTE: The HF scheduler_config.json says `"beta_schedule": "linear"`, BUT
-  /// testing at 1024×1024 shows severe color distortion with both `linear` and
-  /// `scaledLinear`. Further investigation needed to determine the correct schedule.
-  /// Using `scaledLinear` here matches the S4 fix that improved output from all-black.
+  /// DPM-Solver++ scheduler configuration (identical to int4 recipe).
   public var schedulerConfig: DPMSolverSchedulerConfiguration {
     DPMSolverSchedulerConfiguration(
       betaSchedule: .scaledLinear(betaStart: 0.0001, betaEnd: 0.02),
@@ -84,11 +77,7 @@ public struct PixArtRecipe: PipelineRecipe, Sendable {
 
   // MARK: - Decoder Configuration
 
-  /// SDXL VAE decoder configuration.
-  ///
-  /// - componentId: "sdxl-vae-decoder-fp16" — float16 (Conv2d layers do not benefit from int4)
-  /// - latentChannels: 4 — matches PixArtDiT.outputLatentChannels
-  /// - scalingFactor: 0.13025 — standard SDXL VAE scaling factor
+  /// SDXL VAE decoder configuration (same as int4 recipe).
   public var decoderConfig: SDXLVAEDecoderConfiguration {
     SDXLVAEDecoderConfiguration(
       componentId: "sdxl-vae-decoder-fp16",
@@ -104,40 +93,35 @@ public struct PixArtRecipe: PipelineRecipe, Sendable {
 
   // MARK: - PipelineRecipe Properties
 
-  /// PixArt-Sigma is text-to-image only; image-to-image is not supported.
+  /// PixArt-Sigma is text-to-image only.
   public var supportsImageToImage: Bool { false }
 
   /// Use empty string encoding for classifier-free guidance unconditional embedding.
-  /// This means CFG encodes "" through T5XXLEncoder for the unconditional branch.
   public var unconditionalEmbeddingStrategy: UnconditionalEmbeddingStrategy { .emptyPrompt }
 
   /// All Acervo component IDs required by this recipe.
   ///
-  /// Order: encoder, backbone, decoder (scheduler and renderer have no weights).
-  /// T5-XXL and SDXL VAE are catalog components; PixArt DiT is owned by this package.
+  /// Uses `pixart-sigma-xl-dit-fp16` instead of `pixart-sigma-xl-dit-int4`.
+  /// T5-XXL and SDXL VAE remain the same int4/fp16 components as the base recipe.
   public var allComponentIds: [String] {
     [
       "t5-xxl-encoder-int4",
-      "pixart-sigma-xl-dit-int4",
+      "pixart-sigma-xl-dit-fp16",
       "sdxl-vae-decoder-fp16",
     ]
   }
 
   // MARK: - Quantization
 
-  /// All components use weights as stored (int4 for DiT and T5, fp16 for VAE).
+  /// All components use weights as stored: fp16 for the DiT (no quantization),
+  /// int4 for T5, fp16 for VAE.
   public func quantizationFor(_ role: PipelineRole) -> QuantizationConfig {
     .asStored
   }
 
   // MARK: - Validation
 
-  /// Validates shape contract consistency.
-  ///
-  /// The pipeline assembly validates:
-  /// - encoderConfig.embeddingDim == backboneConfig.captionChannels (4096)
-  /// - encoderConfig.maxSequenceLength == backboneConfig.maxTextLength (120)
-  /// - decoderConfig.latentChannels == backbone outputLatentChannels (4)
+  /// Validates shape contract consistency (same checks as PixArtRecipe).
   public func validate() throws {
     let config = backboneConfig
     guard encoderConfig.embeddingDim == config.captionChannels else {
@@ -159,11 +143,4 @@ public struct PixArtRecipe: PipelineRecipe, Sendable {
       )
     }
   }
-}
-
-// MARK: - Validation Error
-
-/// Errors thrown by PixArtRecipe.validate().
-public enum PixArtRecipeError: Error, Sendable {
-  case shapeMismatch(String)
 }
