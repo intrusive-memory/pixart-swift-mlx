@@ -62,13 +62,14 @@ public struct PixArtRecipe: PipelineRecipe, Sendable {
 
   /// DPM-Solver++ scheduler configuration.
   ///
-  /// NOTE: The HF scheduler_config.json says `"beta_schedule": "linear"`, BUT
-  /// testing at 1024×1024 shows severe color distortion with both `linear` and
-  /// `scaledLinear`. Further investigation needed to determine the correct schedule.
-  /// Using `scaledLinear` here matches the S4 fix that improved output from all-black.
+  /// PixArt-Sigma trains with a LINEAR beta schedule: betas = linspace(0.0001, 0.02, 1000).
+  /// Confirmed from the HF scheduler_config.json (`"beta_schedule": "linear"`) and verified
+  /// against the source safetensors: adaln_single.linear.weight is [6912, 1152], meaning
+  /// NO micro-conditioning — only timestep. The scaledLinear schedule is 4.26× slower to
+  /// denoise at t=500 and violates the training prior by 18× at t=999. Use linear.
   public var schedulerConfig: DPMSolverSchedulerConfiguration {
     DPMSolverSchedulerConfiguration(
-      betaSchedule: .scaledLinear(betaStart: 0.0001, betaEnd: 0.02),
+      betaSchedule: .linear(betaStart: 0.0001, betaEnd: 0.02),
       predictionType: .epsilon,
       solverOrder: 2,
       trainTimesteps: 1000
