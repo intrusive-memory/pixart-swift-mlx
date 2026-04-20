@@ -19,7 +19,8 @@ let package = Package(
     ),
   ],
   dependencies: [
-    .package(url: "https://github.com/intrusive-memory/SwiftTuberia.git", from: "0.3.6"),
+    .package(url: "https://github.com/intrusive-memory/SwiftTuberia.git", from: "0.4.0"),
+    .package(url: "https://github.com/intrusive-memory/SwiftAcervo.git", from: "0.7.2"),
     .package(url: "https://github.com/apple/swift-argument-parser", from: "1.7.1"),
   ],
   targets: [
@@ -28,12 +29,14 @@ let package = Package(
       dependencies: [
         .product(name: "Tuberia", package: "SwiftTuberia"),
         .product(name: "TuberiaCatalog", package: "SwiftTuberia"),
+        .product(name: "SwiftAcervo", package: "SwiftAcervo"),
       ]
     ),
     .executableTarget(
       name: "PixArtCLI",
       dependencies: [
         "PixArtBackbone",
+        .product(name: "SwiftAcervo", package: "SwiftAcervo"),
         .product(name: "ArgumentParser", package: "swift-argument-parser"),
       ]
     ),

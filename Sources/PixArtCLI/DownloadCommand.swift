@@ -2,7 +2,6 @@ import ArgumentParser
 import Foundation
 import PixArtBackbone
 import SwiftAcervo
-import TuberiaCatalog
 
 struct DownloadCommand: AsyncParsableCommand {
   static let configuration = CommandConfiguration(
@@ -16,29 +15,29 @@ struct DownloadCommand: AsyncParsableCommand {
   mutating func run() async throws {
     _ = PixArtComponents.registered
 
-    let registry = CatalogRegistration.shared
-    let descriptors = registry.registeredDescriptors()
-      .sorted { $0.componentId < $1.componentId }
+    let recipe = PixArtRecipe()
+    let componentIds = recipe.allComponentIds.sorted()
 
-    print("Downloading \(descriptors.count) component(s)...")
+    print("Downloading \(componentIds.count) component(s)...")
 
-    for descriptor in descriptors {
-      print("\n[\(descriptor.componentId)]")
-      print("  Repo: \(descriptor.huggingFaceRepo)")
+    for componentId in componentIds {
+      guard let descriptor = Acervo.component(componentId) else {
+        print("\n[\(componentId)] (descriptor not registered, skipping)")
+        continue
+      }
+
+      print("\n[\(descriptor.id)]")
+      print("  Repo: \(descriptor.repoId)")
       let sizeGB = Double(descriptor.estimatedSizeBytes) / 1_073_741_824
       print(String(format: "  Size: ~%.1f GB", sizeGB))
 
-      let isAvailable = Acervo.isModelAvailable(descriptor.huggingFaceRepo)
-      if isAvailable && !force {
+      if Acervo.isComponentReady(descriptor.id) && !force {
         print("  Status: already downloaded, skipping")
         continue
       }
 
       print("  Downloading...")
-      try await Acervo.ensureAvailable(
-        descriptor.huggingFaceRepo,
-        files: descriptor.filePatterns
-      ) { progress in
+      try await Acervo.ensureComponentReady(descriptor.id) { progress in
         let pct = Int(progress.overallProgress * 100)
         print("  \(progress.fileName): \(pct)%", terminator: "\r")
         fflush(stdout)

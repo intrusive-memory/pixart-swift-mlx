@@ -2,7 +2,6 @@ import ArgumentParser
 import Foundation
 import PixArtBackbone
 import SwiftAcervo
-import TuberiaCatalog
 
 struct InfoCommand: ParsableCommand {
   static let configuration = CommandConfiguration(
@@ -14,7 +13,6 @@ struct InfoCommand: ParsableCommand {
     _ = PixArtComponents.registered
 
     let recipe = PixArtRecipe()
-    let registry = CatalogRegistration.shared
 
     print("PixArt-Sigma Pipeline")
     print("=====================")
@@ -29,15 +27,14 @@ struct InfoCommand: ParsableCommand {
     print("----------")
     let componentIds = recipe.allComponentIds
 
-    var totalEstimatedBytes = 0
+    var totalEstimatedBytes: Int64 = 0
     for componentId in componentIds {
-      guard let descriptor = registry.descriptor(for: componentId) else {
+      guard let descriptor = Acervo.component(componentId) else {
         print("  \(componentId): (descriptor not found)")
         continue
       }
       let sizeGB = Double(descriptor.estimatedSizeBytes) / 1_073_741_824
-      let available = Acervo.isModelAvailable(descriptor.huggingFaceRepo)
-      let status = available ? "downloaded" : "not downloaded"
+      let status = Acervo.isComponentReady(descriptor.id) ? "downloaded" : "not downloaded"
       print(String(format: "  %-35s  ~%.1f GB  %@", componentId, sizeGB, status))
       totalEstimatedBytes += descriptor.estimatedSizeBytes
     }
