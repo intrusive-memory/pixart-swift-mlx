@@ -1,358 +1,283 @@
-# pixart-swift-mlx — Requirements
+---
+title: "pixart-swift-mlx — SwiftAcervo Integration Requirements"
+date: 2026-04-18
+version: "1.0"
+status: "READY FOR EXECUTION"
+priority: "🟡 MEDIUM"
+---
 
-**Status**: DRAFT — debate and refine before implementation.
-**Parent project**: [`PROJECT_PIPELINE.md`](../PROJECT_PIPELINE.md) — Unified MLX Inference Architecture (§3. pixart-swift-mlx, Wave 3)
-**Scope**: PixArt-Sigma model plugin for SwiftTubería. Provides the PixArt DiT backbone and model-specific components. All shared infrastructure (weight loading, memory management, scheduling, VAE decoding, image rendering) comes from SwiftTubería.
-**Supersedes**: `docs/incomplete/REQUIREMENTS_STANDALONE.md` (standalone library approach)
+# pixart-swift-mlx — SwiftAcervo Integration Requirements
+
+**Mission Context**: Part of SwiftAcervo Consumer Adoption Wave 2+  
+**Master Index**: `/Users/stovak/Projects/REQUIREMENTS.md`  
+**Audit Source**: `/Users/stovak/Projects/ACERVO_CONSUMER_AUDIT.md` (lines 403–406, 428, addendum §CDN Upload)  
+**Architecture Spec**: `./REQUIREMENTS.md` (pre-existing DRAFT, this file complements it)
 
 ---
 
-## Motivation
+## Audit Findings
 
-PixArt-Sigma is a ~600M parameter Diffusion Transformer — small enough for M-series iPads, Apache 2.0 licensed, and capable of up to 4K resolution. Under the SwiftTubería architecture, this package provides only what is unique to PixArt. Everything else is pipe segments from the shared catalog.
+### Current State (Pre-Sortie)
 
-### What This Package Provides vs What SwiftTubería Provides
+| Finding | Status | Impact |
+|---------|--------|--------|
+| Has only `tests.yml` CI | ❌ Missing CDN | Components NOT on private CDN |
+| PixArt DiT NOT on Acervo CDN | ❌ Custom HF download | First-run slow, no centralized caching |
+| No CDN upload workflow | ❌ Workflow missing | Cannot ship model to R2 |
+| No `acervo ship` integration | ❌ Manual process | Duplicates SwiftBruja/SwiftProyecto CDN logic |
 
-| Concern | This Package | SwiftTubería |
-|---|---|---|
-| DiT backbone (28-block transformer) | **Yes** — the only substantial new code | — |
-| Weight key mapping (HF → MLX) | **Yes** | — |
-| Model configuration | **Yes** | — |
-| Pipeline recipe | **Yes** | — |
-| T5-XXL text encoder | — | **Yes** (catalog: `T5XXLEncoder`) |
-| SDXL VAE decoder | — | **Yes** (catalog: `SDXLVAEDecoder`) |
-| DPM-Solver++ scheduler | — | **Yes** (catalog: `DPMSolverScheduler`) |
-| Image rendering (MLXArray → CGImage) | — | **Yes** (catalog: `ImageRenderer`) |
-| Weight loading + quantization | — | **Yes** (infrastructure: `WeightLoader`) |
-| Model downloading + caching | — | **Yes** (via SwiftAcervo Component Registry) |
-| Memory management | — | **Yes** (infrastructure: `MemoryManager`) |
-| Progress reporting | — | **Yes** (infrastructure: `PipelineProgress`) |
+**Critical Issue**: No centralized model caching via SwiftAcervo. PixArt DiT (and T5-XXL, SDXL VAE catalog components) must be uploaded to private R2 CDN using `acervo ship` command.
+
+**Reference**: ACERVO_CONSUMER_AUDIT.md § Addendum (lines 249–535) — Standardize on `acervo` CLI for all CDN workflows.
 
 ---
 
-## P1. Package Structure
+## Sorties
 
-### P1.1 Products
+### Sortie 1: Baseline Acervo Integration Assessment
 
-```swift
-.library(name: "PixArtBackbone", targets: ["PixArtBackbone"]),
-.executable(name: "PixArtCLI", targets: ["PixArtCLI"]),
-```
+**Objective**: Audit current component descriptor implementation and identify gaps vs. audit requirements.
 
-- **`PixArtBackbone`** — The DiT transformer, configuration, weight key mapping, and pipeline recipe. This is what SwiftVinetas imports (as `PixArtCore` or via SwiftTubería's pipeline builder).
-- **`PixArtCLI`** — Standalone command-line tool for testing and debugging.
+**Entry Criteria**:
+- pixart-swift-mlx repo cloned at `/Users/stovak/Projects/pixart-swift-mlx/`
+- Audit findings read (this file, lines 1–30)
 
-### P1.2 Dependencies
+**Tasks**:
+1. Verify `ComponentDescriptor` definitions exist for:
+   - `pixart-sigma-xl-dit-int4` (backbone — owned by this package)
+   - `t5-xxl-encoder-int4` (catalog, re-registered for safety)
+   - `sdxl-vae-decoder-fp16` (catalog, re-registered for safety)
+2. Check Acervo registration code:
+   - `enum PixArtComponents` exists
+   - Static `registered: Bool` initializer runs at module load
+   - All three descriptors have HuggingFace repos, SHA-256 checksums, manifest URLs
+3. Validate registration call sites:
+   - Pipeline assembly calls `_ = PixArtComponents.registered` before building
+   - No other code paths bypass registration
+4. Audit component access patterns:
+   - All model loads use `AcervoManager.shared.withComponentAccess(id)`
+   - Zero direct file path access to model files
+   - Zero hardcoded `/Library/SharedModels/` paths
 
-```swift
-.package(url: "<SwiftTubería>", from: "0.1.0"),  // protocols + catalog
-.package(url: "https://github.com/apple/swift-argument-parser", from: "1.3.0"),
-```
+**Exit Criteria**:
+- Assessment document created: `./INTEGRATION_BASELINE.md`
+  - List of found vs. missing descriptors
+  - Code locations (file + line) for each finding
+  - Gaps vs. audit requirement: "All components must register + access via withComponentAccess()"
+- Exit status: PASS (all registered + all accessed via closure) OR FAIL (gaps documented)
 
-This package depends **only** on SwiftTubería (which transitively provides mlx-swift, swift-transformers). No direct MLX dependency needed — the pipeline protocols abstract it.
-
-### P1.3 Platforms
-
-```swift
-platforms: [.macOS(.v26), .iOS(.v26)]
-```
-
-PixArt's ~2 GB footprint (int4, all components) makes it viable on M-series iPads. This is a key differentiator from FLUX.2. **iOS testing is out of scope for this iteration** — no iOS CI job, no iOS-specific tests. Platform declaration is kept to avoid breaking downstream consumers.
-
----
-
-## P2. PixArt DiT Backbone
-
-The backbone is the single substantial piece of new code. It conforms to SwiftTubería's `Backbone` protocol.
-
-### P2.1 Architecture Summary
-
-| Parameter | Value |
-|---|---|
-| hidden_size | 1152 |
-| num_heads | 16 |
-| head_dim | 72 |
-| depth | 28 blocks |
-| patch_size | 2 |
-| in_channels | 4 (VAE latent) |
-| out_channels | 8 (4 noise + 4 variance; last 4 discarded at inference) |
-
-**Variance channel handling**: At inference time, the backbone's `forward()` discards the last 4 channels: `rawOutput[.all, .all, .all, 0..<4]`. The Backbone protocol outlet is `[B, H/8, W/8, 4]` — the pipeline never sees 8 channels. Variance channels are only used during training (learned sigma for loss weighting).
-| mlp_ratio | 4.0 (FFN hidden = 4608) |
-| caption_channels | 4096 (T5-XXL embedding dim) |
-| max_text_length | 120 tokens |
-
-### P2.2 Key Architectural Features
-
-1. **AdaLN-Single** — One global `t_block` MLP produces timestep conditioning. Each of the 28 blocks adds its own learned `scale_shift_table` (6 × 1152 parameters) to produce per-block modulation. This is cheaper than per-block MLPs.
-
-2. **Cross-attention to T5 embeddings** — Each block has self-attention (image tokens attend to each other) then cross-attention (image tokens attend to projected T5 text embeddings). Cross-attention receives NO timestep modulation.
-
-3. **2D sinusoidal position embeddings** — Recomputed dynamically per forward pass based on actual spatial dimensions. Enables variable resolution natively via aspect ratio binning.
-
-4. **Micro-conditioning** — Resolution and aspect ratio are embedded and concatenated with the timestep embedding, giving the model explicit awareness of the target dimensions. Uses a 64-bucket aspect ratio scheme from the PixArt-Sigma paper at 1024px base resolution. Common buckets: 1:1 (1024×1024), 4:3 (1152×896), 3:4 (896×1152), 16:9 (1344×768), 9:16 (768×1344), etc. The backbone rounds user-requested resolution to the nearest bucket for conditioning but generates at the requested resolution. Bucket scheme is documented in the backbone configuration struct.
-
-### P2.3 Backbone Protocol Conformance
-
-```
-inlet:  BackboneInput {
-            latents:          MLXArray [B, H/8, W/8, 4]
-            conditioning:     MLXArray [B, 120, 4096]    ← from T5XXLEncoder outlet
-            conditioningMask: MLXArray [B, 120]           ← from T5XXLEncoder outlet
-            timestep:         MLXArray [B]
-        }
-outlet: MLXArray [B, H/8, W/8, 4]                        ← noise prediction (variance channels discarded)
-```
-
-**Shape contract properties**:
-- `expectedConditioningDim: 4096` — matches T5XXLEncoder's `outputEmbeddingDim`
-- `outputLatentChannels: 4` — matches SDXLVAEDecoder's `expectedInputChannels`
-- `expectedMaxSequenceLength: 120` — matches T5XXLEncoderConfiguration's `maxSequenceLength`
-
-The backbone expects T5-XXL embeddings (dim 4096) as conditioning. This is validated at pipeline assembly time — connecting a CLIP encoder (dim 768) would fail.
-
-**Lifecycle**: Conforms to `WeightedSegment` (see SwiftTubería `requirements/PROTOCOLS.md`). The pipeline loads weights via `WeightLoader` using the backbone's `keyMapping` and `tensorTransform`, then calls `apply(weights:)`.
+**Owner**: TBD  
+**Time Estimate**: 1–2 hours
 
 ---
 
-## P3. Weight Key Mapping
+### Sortie 2: Create PixArt ComponentDescriptor (if missing)
 
-PixArt weights from HuggingFace (diffusers format) require key remapping to match the MLX module structure. The backbone's `keyMapping: KeyMapping` property provides a closure that maps each safetensors key to the corresponding MLX module path. WeightLoader calls this for every key during loading.
+**Objective**: If Sortie 1 finds missing descriptor for `pixart-sigma-xl-dit-int4`, create complete definition with HuggingFace metadata.
 
-**Scope**: ~14 global mappings + per-block mappings for 28 blocks. Total: ~200 key pairs.
+**Entry Criteria**:
+- Sortie 1 PASS or FAIL
+- If FAIL: Gap identified is missing `pixart-sigma-xl-dit-int4` descriptor
 
-**Key remapping categories**:
-- Patch embedding: `pos_embed.proj` → module path
-- Timestep conditioning: `adaln_single.*` → `t_block.*`, `t_embedder.*`
-- Per-block attention: diffusers 3-way Q/K/V split → combined or separate projections
-- Per-block cross-attention: 2-way K/V split
-- Per-block FFN: `ff.net` → `mlp.*`
-- Caption projection: `caption_projection` → module path
-- Final layer: `proj_out`, `scale_shift_table`
+**Tasks**:
+1. Determine canonical HuggingFace repo for PixArt DiT:
+   - Must be under `intrusive-memory/` org (per REQUIREMENTS.md P5)
+   - Naming: `intrusive-memory/pixart-sigma-xl-dit-int4-mlx`
+   - Must contain safetensors weights + `config.json`
+2. Create `ComponentDescriptor`:
+   - `id: "pixart-sigma-xl-dit-int4"`
+   - `type: .backbone`
+   - `huggingFaceRepo: "intrusive-memory/pixart-sigma-xl-dit-int4-mlx"`
+   - `manifestUrl: "https://intrusive-memory.r2.dev/pixart-sigma-xl-dit-int4-mlx/manifest.json"` (or current CDN URL)
+   - `expectedSha256: "<32-byte-hex>"` (fetch from live manifest.json)
+   - `size: "~300 MB"` (documented in REQUIREMENTS.md P5)
+3. Register in `PixArtComponents.registered` initializer
+4. Validate conformance:
+   - Matches audit requirement: HuggingFace source + Acervo CDN metadata
+   - Matches REQUIREMENTS.md P5 metadata exactly
 
-**Conv2d weight transposition**: The backbone's `tensorTransform: TensorTransform` transposes Conv2d weights from PyTorch [O,I,kH,kW] → MLX [O,kH,kW,I] for all convolutional layers. WeightLoader applies this per-tensor after key remapping.
+**Exit Criteria**:
+- `ComponentDescriptor` defined in source code (file path documented)
+- Registered in `PixArtComponents.registered`
+- Passes `make test` without new failures
 
----
-
-## P4. Pipeline Recipe
-
-The PixArt recipe connects catalog components with the custom backbone:
-
-```
-┌──────────────┐    ┌──────────────┐    ┌──────────────┐    ┌──────────────┐
-│ T5XXLEncoder │───▶│  PixArtDiT   │───▶│SDXLVAEDecoder│───▶│ImageRenderer │
-│   (catalog)  │    │ (THIS REPO)  │    │   (catalog)  │    │  (catalog)   │
-└──────────────┘    └──────────────┘    └──────────────┘    └──────────────┘
-                          ▲
-                    ┌─────┴──────┐
-                    │DPMSolver++ │
-                    │  (catalog) │
-                    └────────────┘
-```
-
-**Pipe compatibility**:
-- T5XXLEncoder outlet: embeddings [B, 120, 4096] → PixArtDiT inlet: conditioning expects 4096-dim
-- PixArtDiT outlet: latents [B, H/8, W/8, 4] → SDXLVAEDecoder inlet: expects 4 latent channels, scale 0.13025
-- SDXLVAEDecoder outlet: pixels [B, H, W, 3] → ImageRenderer inlet: expects 3-channel float data
-
-### P4.1 Recipe Configuration Values
-
-The `PixArtRecipe` provides configuration values for each catalog component. Configuration types are defined in SwiftTubería `requirements/CATALOG.md`.
-
-```swift
-struct PixArtRecipe: PipelineRecipe {
-    typealias Encoder = T5XXLEncoder
-    typealias Sched = DPMSolverScheduler
-    typealias Back = PixArtDiT
-    typealias Dec = SDXLVAEDecoder
-    typealias Rend = ImageRenderer
-
-    var encoderConfig: T5XXLEncoderConfiguration {
-        .init(componentId: "t5-xxl-encoder-int4", maxSequenceLength: 120, embeddingDim: 4096)
-    }
-    var schedulerConfig: DPMSolverSchedulerConfiguration {
-        .init(betaSchedule: .linear(betaStart: 0.0001, betaEnd: 0.02),
-              predictionType: .epsilon, solverOrder: 2, trainTimesteps: 1000)
-    }
-    var backboneConfig: PixArtDiTConfiguration { ... }  // defined in this package
-    var decoderConfig: SDXLVAEDecoderConfiguration {
-        .init(componentId: "sdxl-vae-decoder-fp16", latentChannels: 4, scalingFactor: 0.13025)
-    }
-    var rendererConfig: Void { () }
-
-    var supportsImageToImage: Bool { false }
-    var unconditionalEmbeddingStrategy: UnconditionalEmbeddingStrategy { .emptyPrompt }
-    var allComponentIds: [String] {
-        ["t5-xxl-encoder-int4", "pixart-sigma-xl-dit-int4", "sdxl-vae-decoder-fp16"]
-    }
-    func quantizationFor(_ role: PipelineRole) -> QuantizationConfig { .asStored }
-}
-```
-
-**Default generation parameters** (used by `PixArtModelDescriptor`):
-
-| Parameter | Value |
-|---|---|
-| default_steps | 20 |
-| default_guidance | 4.5 |
-
-**Important**: PixArt uses standard linear beta schedule, NOT shifted cosine.
-
-### P4.2 Memory Profiles
-
-| Configuration | Peak Memory | Strategy |
-|---|---|---|
-| All components loaded (int4) | ~2 GB | Mac with 8+ GB |
-| Two-phase: T5 phase | ~1.4 GB | Future iOS (deferred) |
-| Two-phase: DiT + VAE phase | ~500 MB | Future iOS (deferred) |
+**Owner**: TBD  
+**Time Estimate**: 1–2 hours  
+**Depends On**: Sortie 1
 
 ---
 
-## P5. Acervo Component Descriptors
+### Sortie 3: Create CDN Upload Workflow
 
-Components registered into SwiftAcervo's Component Registry at import time:
+**Objective**: Create `.github/workflows/ensure-model-cdn.yml` using `acervo ship` to upload PixArt DiT, T5-XXL, SDXL VAE to R2 CDN.
 
-| Component | Acervo ID | Type | Size (int4) | HuggingFace Source |
-|---|---|---|---|---|
-| PixArt-Sigma XL DiT | `pixart-sigma-xl-dit-int4` | backbone | ~300 MB | intrusive-memory CDN |
-| T5-XXL | `t5-xxl-encoder-int4` | encoder | ~1.2 GB | intrusive-memory CDN |
-| SDXL VAE | `sdxl-vae-decoder-fp16` | decoder | ~160 MB | existing SDXL VAE |
+**Entry Criteria**:
+- Sorties 1–2 complete (ComponentDescriptor in place)
+- Access to `acervo` CLI (installed at `~/.local/bin/acervo` or via `cargo` if needed)
+- GitHub repo secrets: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` (R2 credentials)
+- CDN R2 bucket details (account, endpoint, bucket name)
 
-T5-XXL and SDXL VAE are **catalog components** — their Acervo descriptors are authoritatively defined in SwiftTubería `requirements/CATALOG.md` § Catalog Component Acervo Descriptors. TuberíaCatalog registers them at import time. This package re-registers them for safety (Acervo deduplicates by component ID; same ID + same repo = no-op). The values below MUST match SwiftTubería `requirements/CATALOG.md` § Catalog Component Acervo Descriptors.
+**Design Principles**:
+- **Single source of truth**: Use `acervo ship` command (never manual curl/shasum/jq)
+- **Audit alignment**: Follow pattern in ACERVO_CONSUMER_AUDIT.md § "What Acervo Provides" (line 434–446)
+- **Reference implementations**: SwiftBruja & SwiftProyecto `.github/workflows/ensure-model-cdn.yml` (custom logic) are ANTI-PATTERNS; this workflow must be SIMPLER using `acervo` CLI
+- **Trigger**: `workflow_dispatch` (manual) + push to `main` (automatic)
 
-Pipeline code accesses these components exclusively through `AcervoManager.shared.withComponentAccess(id)` — never through file paths.
+**Tasks**:
+1. Create `.github/workflows/ensure-model-cdn.yml`:
+   - Trigger: `on: [push: branches: [main], workflow_dispatch]`
+   - Job: `upload-models`
+   - Runner: `macos-26` (per CLAUDE.md SwiftBuild requirements)
+   - Steps:
+     a. Checkout code
+     b. Install `acervo` CLI (if not already on runner)
+     c. Authenticate to R2 (set AWS credentials)
+     d. Run `acervo ship --model-id "intrusive-memory/pixart-sigma-xl-dit-int4-mlx"`
+        - Automatically downloads from HF, generates manifest.json with SHA-256, uploads to R2
+     e. Run `acervo ship --model-id "intrusive-memory/t5-xxl-int4-mlx"` (catalog component)
+     f. Run `acervo ship --model-id "intrusive-memory/sdxl-vae-fp16-mlx"` (catalog component)
+     g. Verify uploads: `acervo verify` on each uploaded manifest
+2. Document workflow in README or AGENTS.md:
+   - When to trigger manually (e.g., "after weight conversion")
+   - Expected outputs (manifest URLs, CDN links)
+3. Update ComponentDescriptor manifest URLs (if CDN paths differ):
+   - Extract from workflow logs or Acervo output
+   - Update `manifestUrl` field in Sortie 2
 
-**Registration timing**: Components are registered at import time via Swift static `let` initialization:
-```swift
-public enum PixArtComponents {
-    public static let registered: Bool = {
-        Acervo.register([
-            // Model-specific — owned by this package
-            ComponentDescriptor(id: "pixart-sigma-xl-dit-int4",
-                                type: .backbone,
-                                huggingFaceRepo: "intrusive-memory/pixart-sigma-xl-dit-int4-mlx",
-                                ...),
-            // Catalog components — values from SwiftTubería `requirements/CATALOG.md` § Catalog Component Acervo Descriptors (re-registered for safety)
-            ComponentDescriptor(id: "t5-xxl-encoder-int4",
-                                type: .encoder,
-                                huggingFaceRepo: "intrusive-memory/t5-xxl-int4-mlx",
-                                ...),
-            ComponentDescriptor(id: "sdxl-vae-decoder-fp16",
-                                type: .decoder,
-                                huggingFaceRepo: "intrusive-memory/sdxl-vae-fp16-mlx",
-                                ...),
-        ])
-        return true
-    }()
-}
-```
-Swift guarantees this initializer is thread-safe and runs exactly once. Pipeline assembly can call `_ = PixArtComponents.registered` as a defensive trigger.
+**Exit Criteria**:
+- Workflow file created at `.github/workflows/ensure-model-cdn.yml`
+- Passes GitHub Actions syntax check (no parse errors)
+- References only `acervo ship` (no manual curl/shasum/jq/aws-cli for manifest generation)
+- Documented in project README or AGENTS.md
 
-**HuggingFace repo conventions**: Converted model weights are hosted under the `intrusive-memory` HuggingFace organization. Repo naming: `intrusive-memory/{model}-{quantization}-mlx`.
-
-| Component | HuggingFace Repo | Notes |
-|---|---|---|
-| PixArt-Sigma XL DiT (int4) | `intrusive-memory/pixart-sigma-xl-dit-int4-mlx` | Owned by this package — created during weight conversion (P7) |
-| T5-XXL (int4) | `intrusive-memory/t5-xxl-int4-mlx` | Catalog component — authoritative definition in SwiftTubería `requirements/CATALOG.md` § Catalog Component Acervo Descriptors |
-| SDXL VAE (fp16) | `intrusive-memory/sdxl-vae-fp16-mlx` | Catalog component — authoritative definition in SwiftTubería `requirements/CATALOG.md` § Catalog Component Acervo Descriptors |
-
-The T5-XXL and SDXL VAE repos are shared with all future consumers of these catalog components. The PixArt DiT repo is owned by this package. All repos are created during weight conversion (P7) and populated with MLX safetensors plus `config.json`.
+**Owner**: TBD  
+**Time Estimate**: 2–3 hours  
+**Depends On**: Sorties 1–2
 
 ---
 
-## P6. LoRA Support
+### Sortie 4: Standardize Manifest Format
 
-PixArt LoRA adapters target the DiT transformer's attention layers:
-- Self-attention: Q, K, V, output projections (per block)
-- Cross-attention: Q, K, V, output projections (per block)
+**Objective**: Ensure PixArt ComponentDescriptor manifest.json format matches Acervo schema (not custom SwiftBruja/SwiftProyecto format).
 
-SwiftTubería's LoRA infrastructure applies adapters to all keys in the LoRA safetensors file that match the loaded model's keys (see SwiftTubería `requirements/PIPELINE.md` § LoRA System). The backbone's `keyMapping` is reused for LoRA key translation — no separate LoRA target declaration is needed.
+**Entry Criteria**:
+- Sortie 3 complete (workflow generates manifest.json on R2 CDN)
+- Access to live manifest.json at CDN URL
 
-**Constraint**: Single active LoRA per generation (same constraint as FLUX). Multiple LoRAs require sequential load/unload. SwiftTubería's LoRA infrastructure can lift this constraint in a future version by supporting `[LoRAConfig]` with per-adapter scaling.
+**Tasks**:
+1. Fetch manifest.json from CDN:
+   - `curl "https://intrusive-memory.r2.dev/pixart-sigma-xl-dit-int4-mlx/manifest.json"`
+2. Validate schema against Acervo spec:
+   - Reference: SwiftAcervo repository `docs/manifest-schema.md` (if exists) OR
+   - Reference: ACERVO_CONSUMER_AUDIT.md § "Custom manifest schema" (lines 307–310) for what NOT to do
+3. Check required fields:
+   - `version` (should be `"2.0"` for standardized Acervo format)
+   - `components` array with `id`, `sha256`, `url`, `size`
+   - `manifestChecksum` (SHA-256 of entire manifest)
+4. Document findings:
+   - If format matches Acervo spec: ✅ PASS
+   - If format differs: Create task to align with SwiftAcervo schema
 
----
+**Exit Criteria**:
+- Manifest format audit document created
+- Format matches Acervo spec (version, required fields)
+- No references to SwiftBruja/SwiftProyecto custom schemas
 
-## P7. Weight Conversion Scripts
-
-- `scripts/convert_pixart_weights.py` — PixArt-Sigma PyTorch → int4 MLX safetensors
-- `scripts/convert_t5_weights.py` — T5-XXL PyTorch → int4 MLX safetensors (shared with any future T5 consumer)
-- `scripts/convert_vae_weights.py` — SDXL VAE PyTorch → float16 MLX safetensors (shared)
-
-Each script validates output via forward pass comparison to PyTorch reference. Test protocol:
-1. Convert weights (PyTorch → MLX safetensors)
-2. Run forward pass with 5 deterministic prompts at known seeds on both PyTorch and MLX
-3. Compare per-layer activations (where feasible) and final output images
-4. All outputs must achieve PSNR > 30 dB vs PyTorch reference
-5. Per-layer validation: investigate if any single layer drops below 25 dB (even if end-to-end passes)
-
-30 dB is conservative and accounts for int4 quantization fidelity loss.
-
----
-
-## P8. CLI Tool
-
-Standalone executable for testing outside of SwiftVinetas:
-
-```bash
-pixart-cli generate --prompt "..." --width 1024 --height 1024 --output image.png
-pixart-cli download              # fetch all model components
-pixart-cli info                  # show model details and download status
-```
-
-Internally, the CLI assembles the PixArt pipeline recipe and calls `pipeline.generate()`.
+**Owner**: TBD  
+**Time Estimate**: 1 hour  
+**Depends On**: Sortie 3
 
 ---
 
-## P9. Testing Strategy
+### Sortie 5: Remove Direct File Path Access
 
-### P9.1 Backbone Unit Tests
-- DiT block forward pass: synthetic input → expected output shape
-- AdaLN-Single modulation: verify scale/shift/gate application
-- Cross-attention: verify Q from image, K/V from text
-- Patch embedding: verify spatial → sequence conversion
-- Position embedding: verify 2D sinusoidal computation
+**Objective**: Audit codebase for hardcoded `/Library/SharedModels/`, HuggingFace paths, or `FileManager` access to models. Replace with `withComponentAccess()`.
 
-### P9.2 Integration Tests
-- Full pipeline recipe assembly → validation passes
-- Prompt → CGImage (correct dimensions, non-zero pixels)
-- Seed reproducibility:
-  - Same device, same seed → PSNR > 40 dB between runs ("visually identical")
-  - Byte-for-byte reproduction is NOT guaranteed (MLX makes no such promise)
-- Two-phase loading (encoder phase + DiT/VAE phase) — macOS only; iPad validation is deferred
+**Entry Criteria**:
+- Sorties 1–2 complete (descriptors registered)
+- Sortie 3 complete (CDN workflow in place)
 
-### P9.3 What Is NOT Tested Here
-- T5XXLEncoder correctness (tested in SwiftTubería catalog tests)
-- SDXLVAEDecoder correctness (tested in SwiftTubería catalog tests)
-- DPMSolverScheduler correctness (tested in SwiftTubería catalog tests)
-- ImageRenderer correctness (tested in SwiftTubería catalog tests)
-- Weight loading mechanics (tested in SwiftTubería infrastructure tests)
+**Tasks**:
+1. Search codebase for model file access patterns:
+   - Grep for `/Library/SharedModels/`
+   - Grep for hardcoded HuggingFace `huggingface.co/` or `hf_token` references
+   - Grep for `FileManager` calls to model directories
+   - Grep for direct `Bundle.main.path()` or `URL(fileURLWithPath:)` for models
+2. For each finding, determine:
+   - Is this legacy code (pre-Acervo)?
+   - Should this use `AcervoManager.shared.withComponentAccess(componentId)` instead?
+3. Create migration list:
+   - Old pattern → New pattern mapping
+   - Call sites needing refactoring
+4. If refactoring is in scope: Execute replacements
+   - Ensure all model access is within `withComponentAccess { ... }` closure
+5. If refactoring is out of scope: Document as follow-up task
 
-This is the core benefit of the pipeline architecture: component tests are written once and validated for every model that uses them.
+**Exit Criteria**:
+- Audit document created: `./MODEL_ACCESS_AUDIT.md`
+- List of direct file access patterns found (or "none found" if clean)
+- Call sites documented with refactoring recommendations
+- If refactored: `make test` passes without new failures
 
-### P9.4 Coverage and CI Stability Requirements
-
-- All new code must achieve **≥90% line coverage** in unit tests. Coverage is measured per-target and enforced in CI.
-- **No timed tests**: Tests must not use `sleep()`, `Task.sleep()`, `Thread.sleep()`, fixed-duration `XCTestExpectation` timeouts, or any wall-clock assertions. All asynchronous behavior must be validated via deterministic synchronization (`async`/`await`, `AsyncStream`, fulfilled expectations with immediate triggers).
-- **No environment-dependent tests**: Backbone unit tests (P9.1) must use synthetic inputs and run without real model weights or GPU. Integration tests (P9.2) that require downloaded models and GPU compute must be clearly separated (separate test target or `#if INTEGRATION_TESTS` gate).
-- **Flaky tests are test failures**: A test that passes intermittently is treated as a failing test until fixed. CI must not use retry-on-failure to mask flakiness.
-
----
-
-## P10. SwiftVinetas Integration
-
-SwiftVinetas's `PixArtEngine` stub currently gates on `#if canImport(PixArtCore)`. With the pipeline architecture:
-
-1. `PixArtEngine` imports `PixArtBackbone` and `Tubería`
-2. Constructs a `DiffusionPipeline` using the PixArt recipe
-3. Delegates `generate()`, `loadModel()`, `download()` to the pipeline
-4. The engine becomes a thin adapter (~50 lines) between Vinetas's `ImageGenerationEngine` protocol and the assembled pipeline
+**Owner**: TBD  
+**Time Estimate**: 1–2 hours  
+**Depends On**: Sorties 1–2
 
 ---
 
-## P11. Reference Materials
+## Key Audit References
 
-- PixArt-Sigma paper: arXiv:2403.04692
-- PixArt-Alpha paper: arXiv:2310.00426
-- PyTorch reference: `PixArt-alpha/PixArt-sigma` on GitHub
-- HuggingFace diffusers: `PixArtSigmaPipeline`
-- Detailed internal architecture: `docs/incomplete/ARCHITECTURE_STANDALONE.md` (tensor shapes, weight mappings, MLX idioms — still valid as implementation reference)
+### ACERVO_CONSUMER_AUDIT.md Sections
+
+| Section | Lines | Topic |
+|---------|-------|-------|
+| pixart-swift-mlx findings | 403–406 | NO CDN workflow, components NOT on CDN |
+| Impact assessment | 410–430 | 3 projects missing CDN (mlx-audio, SwiftTuberia, pixart-swift-mlx) |
+| What Acervo Provides | 434–446 | `acervo ship` command single source of truth |
+| Required Changes Phase 1 | 450+ | Standardize on `acervo` CLI |
+
+### Master Index
+
+- **Parent**: `/Users/stovak/Projects/REQUIREMENTS.md` — Complete mission index for all 6 consumer projects
+- **Wave 2 Status**: `/Users/stovak/Projects/MEMORY.md` — Wave 2 completion summary (SwiftBruja, SwiftProyecto, mlx-audio-swift, SwiftVoxAlta all complete ✅)
+
+---
+
+## Acceptance Criteria (This File)
+
+- [ ] Sortie 1: Baseline assessment complete, INTEGRATION_BASELINE.md created
+- [ ] Sortie 2: ComponentDescriptor for PixArt DiT created/verified
+- [ ] Sortie 3: CDN upload workflow created and functional
+- [ ] Sortie 4: Manifest format audit complete
+- [ ] Sortie 5: Direct file path access audit complete or refactored
+- [ ] All sorties documented in memory or MEMORY.md
+
+---
+
+## Notes
+
+### Architecture Spec Compatibility
+
+This file **complements** the pre-existing `/Users/stovak/Projects/pixart-swift-mlx/REQUIREMENTS.md` (P1–P11 sections). That document covers:
+- Package structure, dependencies, platforms
+- PixArt DiT backbone implementation
+- Weight key mapping, pipeline recipe
+- **Acervo component descriptors are mentioned in P5** but implementation details (manifest URLs, SHA-256) are NOW addressed by this file (Sorties 1–4)
+
+### Why 🟡 MEDIUM Priority
+
+1. ✅ **Core functionality exists** — PixArt backbone, weight loading, pipeline all implemented
+2. ❌ **CDN integration missing** — Models currently download from HuggingFace on first run (slow, not cached)
+3. ⏱️ **Not blocking immediate use** — Package can be built and tested locally
+4. 🔗 **Prerequisite for Wave 3** — Once complete, enables SwiftVinetas integration (P10) and broad adoption
+
+### Time Estimate
+
+- **Total sorties**: 5
+- **Per-sortie**: 1–3 hours
+- **Parallel work**: Sorties 1–2 can run in parallel with Sorties 3–5 (minor dependency on Sortie 1 completion)
+- **Total elapsed**: ~1 week if 1 agent, ~3–4 days if 2 agents
+
+---
+
+**Mission Status**: Ready for agent assignment. Each sortie is self-contained and measurable.
