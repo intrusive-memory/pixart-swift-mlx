@@ -66,7 +66,9 @@ struct RecipeTests {
     }
   }
 
-  @Test("allComponentIds is exactly [t5-xxl-encoder-int4, pixart-sigma-xl-dit-int4, sdxl-vae-decoder-fp16]")
+  @Test(
+    "allComponentIds is exactly [t5-xxl-encoder-int4, pixart-sigma-xl-dit-int4, sdxl-vae-decoder-fp16]"
+  )
   func componentIdsExactOrder() {
     let recipe = PixArtRecipe()
     #expect(

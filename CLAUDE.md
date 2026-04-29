@@ -6,21 +6,12 @@ This file contains instructions specific to Claude Code agents.
 
 ## Build Preferences
 
-- NEVER use `swift build` or `swift test` — use `make` targets or `xcodebuild`
+- NEVER use `swift build` or `swift test` — use `make` targets or `xcodebuild` (XcodeBuildMCP locally; raw `xcodebuild` in CI)
 - Use `make build`, `make test`, `make lint` for standard operations
-- See [AGENTS.md](AGENTS.md) for full list of Makefile targets
-
-## Key Components
-
-- PixArt-Sigma DiT backbone (Backbone protocol conformance)
-- Weight key mapping (PyTorch -> MLX safetensors)
-- Pipeline recipe (T5 + DPM + PixArtDiT + SDXL VAE + ImageRenderer)
-- Acervo component descriptors
-- CLI tool for image generation (`PixArtCLI`)
+- See [AGENTS.md](AGENTS.md) for the full Makefile target list
 
 ## Claude-Specific Critical Rules
 
-1. NEVER use `swift build` or `swift test` — always use Makefile targets
-2. ONLY supports iOS 26.0+ and macOS 26.0+ (NEVER add code for older platforms)
-3. ALWAYS run `make lint` before committing
-4. See [AGENTS.md](AGENTS.md) for universal rules
+1. NEVER use `swift build` or `swift test` — Makefile targets or `xcodebuild` only
+2. Prefer XcodeBuildMCP tools (`build_macos`, `test_macos`, `swift_package_test`, etc.) for local builds when available
+3. See [AGENTS.md](AGENTS.md) for universal rules (platform requirements, lint-before-commit, branch policy)

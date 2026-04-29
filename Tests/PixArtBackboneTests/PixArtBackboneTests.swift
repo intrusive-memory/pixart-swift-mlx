@@ -21,7 +21,11 @@ struct ConfigurationTests {
     #expect(config.captionChannels == 4096)
     #expect(config.maxTextLength == 120)
     #expect(config.peInterpolation == 2.0)
-    #expect(config.baseSize == 512)
+    // baseSize is the **latent** base resolution: 1024px training res / 8x VAE downscale.
+    // The forward pass divides by patchSize (2) to reach the diffusers
+    // PixArtTransformer2DModel.base_size grid of 64. Previously this was 512 (the pixel
+    // base size), which multiplied position coordinates by 4× and corrupted attention.
+    #expect(config.baseSize == 128)
   }
 
   @Test("headDim equals hiddenSize / numHeads")
