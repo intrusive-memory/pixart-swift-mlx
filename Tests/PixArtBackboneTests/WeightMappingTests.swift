@@ -5,111 +5,96 @@ import Testing
 @Suite("Weight Key Mapping")
 struct WeightMappingTests {
 
-  @Test("Key table has expected count: 22 global + 28 blocks × 23 per-block")
-  func keyCount() throws {
+  // MARK: - Identity Passthrough Mapping
+  //
+  // After the SwiftTuberia 0.6 / SwiftAcervo 0.8 dep bump, the int4-quantized
+  // model.safetensors stores keys that ARE the MLX module property paths directly
+  // (e.g. "blocks.0.attn.to_q.weight", "patchEmbed.weight"). No PyTorch/HF-diffusers
+  // → MLX renaming is required, so `PixArtDiT.keyMapping` is an identity passthrough
+  // and `PixArtDiT.tensorTransform` is nil.
+  //
+  // These tests pin that contract.
+
+  @Test("keyMapping is identity for global keys")
+  func globalKeysPassthrough() throws {
     let dit = try PixArtDiT(configuration: PixArtDiTConfiguration())
     let mapping = dit.keyMapping
 
-    // Global keys: 22 (patch embed 2 + caption proj 4 + timestep 4 + resolution 4
-    //   + aspect ratio 4 + t_block 2 + final proj 2 + scale_shift_table 1 = 23)
-    // Wait — let's just count the actual table entries by testing known keys exist.
-    // The mapping is a closure, so we test representative keys from each group.
-
-    // Patch embedding
-    #expect(mapping("pos_embed.proj.weight") == "patchEmbed.weight")
-    #expect(mapping("pos_embed.proj.bias") == "patchEmbed.bias")
+    // Patch embedding (Conv2d already in MLX NHWC layout — no transpose needed)
+    #expect(mapping("patchEmbed.weight") == "patchEmbed.weight")
+    #expect(mapping("patchEmbed.bias") == "patchEmbed.bias")
 
     // Caption projection
-    #expect(mapping("caption_projection.linear_1.weight") == "captionProjection.linear1.weight")
-    #expect(mapping("caption_projection.linear_2.bias") == "captionProjection.linear2.bias")
+    #expect(mapping("captionProjection.linear1.weight") == "captionProjection.linear1.weight")
+    #expect(mapping("captionProjection.linear2.bias") == "captionProjection.linear2.bias")
 
     // Timestep embedder
-    #expect(
-      mapping("adaln_single.emb.timestep_embedder.linear_1.weight")
-        == "timestepEmbedder.linear1.weight")
+    #expect(mapping("timestepEmbedder.linear1.weight") == "timestepEmbedder.linear1.weight")
 
-    // Resolution embedder
+    // Resolution / aspect-ratio embedders (absent from int4 safetensors but the
+    // mapping itself is still identity for any key that might appear)
     #expect(
-      mapping("adaln_single.emb.resolution_embedder.linear_1.weight")
-        == "sizeEmbedder.embedder.linear1.weight")
-
-    // Aspect ratio embedder
-    #expect(
-      mapping("adaln_single.emb.aspect_ratio_embedder.linear_2.bias")
-        == "arEmbedder.embedder.linear2.bias")
+      mapping("sizeEmbedder.embedder.linear1.weight") == "sizeEmbedder.embedder.linear1.weight")
+    #expect(mapping("arEmbedder.embedder.linear2.bias") == "arEmbedder.embedder.linear2.bias")
 
     // t_block
-    #expect(mapping("adaln_single.linear.weight") == "t_block_linear.weight")
+    #expect(mapping("t_block_linear.weight") == "t_block_linear.weight")
 
     // Final layer
-    #expect(mapping("proj_out.weight") == "finalLayer.linear.weight")
-    #expect(mapping("scale_shift_table") == "finalLayer.scaleShiftTable")
+    #expect(mapping("finalLayer.linear.weight") == "finalLayer.linear.weight")
+    #expect(mapping("finalLayer.scaleShiftTable") == "finalLayer.scaleShiftTable")
   }
 
-  @Test("Per-block keys map correctly for block 0 and block 27")
-  func perBlockKeys() throws {
+  @Test("keyMapping is identity for per-block keys (block 0 and block 27)")
+  func perBlockKeysPassthrough() throws {
     let dit = try PixArtDiT(configuration: PixArtDiTConfiguration())
     let mapping = dit.keyMapping
 
     // Block 0: self-attention
-    #expect(mapping("transformer_blocks.0.attn1.to_q.weight") == "blocks.0.attn.to_q.weight")
-    #expect(mapping("transformer_blocks.0.attn1.to_out.0.bias") == "blocks.0.attn.to_out.bias")
+    #expect(mapping("blocks.0.attn.to_q.weight") == "blocks.0.attn.to_q.weight")
+    #expect(mapping("blocks.0.attn.to_out.bias") == "blocks.0.attn.to_out.bias")
 
     // Block 0: cross-attention
-    #expect(mapping("transformer_blocks.0.attn2.to_k.weight") == "blocks.0.cross_attn.to_k.weight")
+    #expect(mapping("blocks.0.cross_attn.to_k.weight") == "blocks.0.cross_attn.to_k.weight")
 
-    // Block 0: FFN
-    #expect(mapping("transformer_blocks.0.ff.net.0.proj.weight") == "blocks.0.mlp.fc1.weight")
-    #expect(mapping("transformer_blocks.0.ff.net.2.weight") == "blocks.0.mlp.fc2.weight")
+    // Block 0: FFN (MLP fc1/fc2)
+    #expect(mapping("blocks.0.mlp.fc1.weight") == "blocks.0.mlp.fc1.weight")
+    #expect(mapping("blocks.0.mlp.fc2.weight") == "blocks.0.mlp.fc2.weight")
 
     // Block 0: scale_shift_table
-    #expect(mapping("transformer_blocks.0.scale_shift_table") == "blocks.0.scaleShiftTable")
+    #expect(mapping("blocks.0.scaleShiftTable") == "blocks.0.scaleShiftTable")
 
-    // Block 27 (last): spot-check
-    #expect(mapping("transformer_blocks.27.attn1.to_q.weight") == "blocks.27.attn.to_q.weight")
-    #expect(mapping("transformer_blocks.27.attn2.to_v.bias") == "blocks.27.cross_attn.to_v.bias")
-    #expect(mapping("transformer_blocks.27.ff.net.2.bias") == "blocks.27.mlp.fc2.bias")
+    // Block 27 (last) — spot-check
+    #expect(mapping("blocks.27.attn.to_q.weight") == "blocks.27.attn.to_q.weight")
+    #expect(mapping("blocks.27.cross_attn.to_v.bias") == "blocks.27.cross_attn.to_v.bias")
+    #expect(mapping("blocks.27.mlp.fc2.bias") == "blocks.27.mlp.fc2.bias")
   }
 
-  @Test("Discarded keys return nil")
-  func discardedKeys() throws {
+  @Test("keyMapping is identity for QK norm keys")
+  func qkNormKeysPassthrough() throws {
     let dit = try PixArtDiT(configuration: PixArtDiTConfiguration())
     let mapping = dit.keyMapping
-    #expect(mapping("pos_embed") == nil)
-    #expect(mapping("y_embedder.y_embedding") == nil)
+    #expect(mapping("blocks.0.attn.q_norm.weight") == "blocks.0.attn.q_norm.weight")
+    #expect(mapping("blocks.0.attn.k_norm.bias") == "blocks.0.attn.k_norm.bias")
   }
 
-  @Test("Unknown keys return nil")
-  func unknownKeys() throws {
+  @Test("keyMapping does not discard keys (no HF-diffusers renaming)")
+  func noKeysDiscarded() throws {
     let dit = try PixArtDiT(configuration: PixArtDiTConfiguration())
     let mapping = dit.keyMapping
-    #expect(mapping("totally_bogus_key") == nil)
-    #expect(mapping("transformer_blocks.99.attn1.to_q.weight") == nil)
+    // The MLX-native safetensors only contains keys that exist in the model, so the
+    // mapping never returns nil — even arbitrary strings pass through unchanged.
+    // Filtering is the responsibility of the safetensors author, not the mapping.
+    #expect(mapping("totally_bogus_key") == "totally_bogus_key")
+    #expect(mapping("blocks.99.attn.to_q.weight") == "blocks.99.attn.to_q.weight")
   }
 
-  @Test("QK norm keys map correctly")
-  func qkNormKeys() throws {
+  @Test("tensorTransform is nil (Conv2d patch embed already in MLX NHWC layout)")
+  func tensorTransformIsNil() throws {
     let dit = try PixArtDiT(configuration: PixArtDiTConfiguration())
-    let mapping = dit.keyMapping
-    #expect(mapping("transformer_blocks.0.attn1.q_norm.weight") == "blocks.0.attn.q_norm.weight")
-    #expect(mapping("transformer_blocks.0.attn1.k_norm.bias") == "blocks.0.attn.k_norm.bias")
-  }
-
-  @Test("Conv2d patch embedding weight requires transposition")
-  func conv2dTransposition() throws {
-    let dit = try PixArtDiT(configuration: PixArtDiTConfiguration())
-    let transform = dit.tensorTransform
-
-    // The patch embedding weight is 4D: PyTorch [O, I, kH, kW] -> MLX [O, kH, kW, I]
-    // Key "patchEmbed.weight" should trigger the transpose; other keys should not.
-    // We verify the transform exists and is non-nil.
-    #expect(transform != nil)
-
-    // Verify the mapping sends "pos_embed.proj.weight" -> "patchEmbed.weight"
-    let mapping = dit.keyMapping
-    #expect(mapping("pos_embed.proj.weight") == "patchEmbed.weight")
-
-    // Verify a non-patch-embed key does NOT produce "patchEmbed.weight"
-    #expect(mapping("adaln_single.linear.weight") != "patchEmbed.weight")
+    // The int4-quantized safetensors stores patchEmbed.weight already in MLX NHWC
+    // layout [O, kH, kW, I] — no PyTorch [O, I, kH, kW] → MLX transposition is
+    // required, so the per-tensor transform hook is unused.
+    #expect(dit.tensorTransform == nil)
   }
 }
