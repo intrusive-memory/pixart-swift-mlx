@@ -111,6 +111,16 @@ public struct PixArtFP16Recipe: PipelineRecipe, Sendable {
     ]
   }
 
+  /// Explicit role → component-ID map. See `PixArtRecipe.componentIdFor` for why
+  /// the default zip-based implementation breaks PixArt.
+  public var componentIdFor: [PipelineRole: String] {
+    [
+      .encoder: "t5-xxl-encoder-int4",
+      .backbone: "pixart-sigma-xl-dit-fp16",
+      .decoder: "sdxl-vae-decoder-fp16",
+    ]
+  }
+
   // MARK: - Quantization
 
   /// All components use weights as stored: fp16 for the DiT (no quantization),
