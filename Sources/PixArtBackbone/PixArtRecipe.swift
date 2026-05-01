@@ -124,6 +124,23 @@ public struct PixArtRecipe: PipelineRecipe, Sendable {
     ]
   }
 
+  /// Explicit role → component-ID map.
+  ///
+  /// We override the default zip-based implementation in `PipelineRecipe` because
+  /// `PipelineRole.allCases` is `[encoder, scheduler, backbone, decoder, renderer]`
+  /// — but PixArt's `allComponentIds` deliberately omits scheduler and renderer
+  /// (both are weightless). Letting the default zip run mis-aligns `backbone` and
+  /// `decoder` (DiT lands on `scheduler`, VAE lands on `backbone`, `decoder` ends
+  /// up unmapped → `DiffusionPipeline.loadModels` skips the decoder and the
+  /// pipeline fails generation with `missingComponent(role: "decoder")`).
+  public var componentIdFor: [PipelineRole: String] {
+    [
+      .encoder: "t5-xxl-encoder-int4",
+      .backbone: "pixart-sigma-xl-dit-int4",
+      .decoder: "sdxl-vae-decoder-fp16",
+    ]
+  }
+
   // MARK: - Quantization
 
   /// All components use weights as stored (int4 for DiT and T5, fp16 for VAE).
