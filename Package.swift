@@ -7,7 +7,18 @@ import PackageDescription
 // at ../<name> if present so in-flight changes can be exercised end-to-end
 // without publishing a release. Falls back to the remote pin if the sibling
 // directory is missing, so fresh clones still build.
-let useLocalSiblings = ProcessInfo.processInfo.environment["CI"] != "true"
+//
+// When this manifest is evaluated as a transitive dependency inside Xcode's
+// `SourcePackages/checkouts/` or SwiftPM's `.build/checkouts/`, every other
+// dependency lives as a sibling in the same directory. Treating those as
+// in-development local paths produces conflicting package identities, so we
+// must skip the sibling shortcut in that context.
+let manifestDir = (#filePath as NSString).deletingLastPathComponent
+let isSPMCheckout =
+  manifestDir.contains("/SourcePackages/checkouts/")
+  || manifestDir.contains("/.build/checkouts/")
+let isCI = ProcessInfo.processInfo.environment["CI"] == "true"
+let useLocalSiblings = !isCI && !isSPMCheckout
 
 func sibling(_ name: String, remote: String, from version: Version) -> Package.Dependency {
   let localPath = "../\(name)"
@@ -37,11 +48,11 @@ let package = Package(
     sibling(
       "SwiftTuberia",
       remote: "https://github.com/intrusive-memory/SwiftTuberia.git",
-      from: "0.6.0"),
+      from: "0.6.2"),
     sibling(
       "SwiftAcervo",
       remote: "https://github.com/intrusive-memory/SwiftAcervo.git",
-      from: "0.8.4"),
+      from: "0.9.0"),
     .package(url: "https://github.com/apple/swift-argument-parser", from: "1.7.1"),
   ],
   targets: [
