@@ -14,7 +14,8 @@ import PackageDescription
 // in-development local paths produces conflicting package identities, so we
 // must skip the sibling shortcut in that context.
 let manifestDir = (#filePath as NSString).deletingLastPathComponent
-let isSPMCheckout = manifestDir.contains("/SourcePackages/checkouts/")
+let isSPMCheckout =
+  manifestDir.contains("/SourcePackages/checkouts/")
   || manifestDir.contains("/.build/checkouts/")
 let isCI = ProcessInfo.processInfo.environment["CI"] == "true"
 let useLocalSiblings = !isCI && !isSPMCheckout
@@ -47,11 +48,11 @@ let package = Package(
     sibling(
       "SwiftTuberia",
       remote: "https://github.com/intrusive-memory/SwiftTuberia.git",
-      from: "0.6.0"),
+      from: "0.6.2"),
     sibling(
       "SwiftAcervo",
       remote: "https://github.com/intrusive-memory/SwiftAcervo.git",
-      from: "0.8.4"),
+      from: "0.9.0"),
     .package(url: "https://github.com/apple/swift-argument-parser", from: "1.7.1"),
   ],
   targets: [
