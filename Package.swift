@@ -52,7 +52,7 @@ let package = Package(
     sibling(
       "SwiftAcervo",
       remote: "https://github.com/intrusive-memory/SwiftAcervo.git",
-      from: "0.9.0"),
+      from: "0.10.0"),
     .package(url: "https://github.com/apple/swift-argument-parser", from: "1.7.1"),
   ],
   targets: [
