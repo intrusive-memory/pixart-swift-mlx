@@ -48,11 +48,11 @@ let package = Package(
     sibling(
       "SwiftTuberia",
       remote: "https://github.com/intrusive-memory/SwiftTuberia.git",
-      from: "0.6.2"),
+      from: "0.6.3"),
     sibling(
       "SwiftAcervo",
       remote: "https://github.com/intrusive-memory/SwiftAcervo.git",
-      from: "0.10.0"),
+      from: "0.11.1"),
     .package(url: "https://github.com/apple/swift-argument-parser", from: "1.7.1"),
   ],
   targets: [
