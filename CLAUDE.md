@@ -14,4 +14,4 @@ This file contains instructions specific to Claude Code agents.
 
 1. NEVER use `swift build` or `swift test` — Makefile targets or `xcodebuild` only
 2. Prefer XcodeBuildMCP tools (`build_macos`, `test_macos`, `swift_package_test`, etc.) for local builds when available
-3. See [AGENTS.md](AGENTS.md) for universal rules (platform requirements, lint-before-commit, branch policy)
+3. See [AGENTS.md](AGENTS.md) for universal rules (platform requirements, lint-before-commit, branch policy, App Group configuration)
