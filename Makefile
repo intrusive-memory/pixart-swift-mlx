@@ -55,7 +55,7 @@ release: resolve
 
 test:
 	@echo "Running Swift tests..."
-	xcodebuild test -scheme $(SCHEME) -destination '$(DESTINATION)'
+	ACERVO_APP_GROUP_ID=group.intrusive-memory.models xcodebuild test -scheme $(SCHEME) -destination '$(DESTINATION)'
 
 test-python:
 	@echo "Running Python conversion script tests..."

@@ -19,4 +19,4 @@ make clean     # Clean build artifacts
 
 1. Use Makefile targets (no MCP access)
 2. ONLY supports iOS 26.0+ and macOS 26.0+
-3. See [AGENTS.md](AGENTS.md) for universal rules
+3. See [AGENTS.md](AGENTS.md) for universal rules (platform requirements, lint-before-commit, branch policy, App Group configuration)

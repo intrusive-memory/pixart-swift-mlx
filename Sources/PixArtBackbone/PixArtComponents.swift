@@ -1,13 +1,6 @@
 import SwiftAcervo
 import TuberiaCatalog
 
-// MARK: - PixArt DiT Component Files
-
-private let pixArtDiTRequiredFiles: [ComponentFile] = [
-  ComponentFile(relativePath: "config.json"),
-  ComponentFile(relativePath: "model.safetensors"),
-]
-
 // MARK: - Acervo Component Descriptors (v2 API)
 
 private let pixArtSigmaXLDiTInt4Descriptor = SwiftAcervo.ComponentDescriptor(
@@ -15,8 +8,6 @@ private let pixArtSigmaXLDiTInt4Descriptor = SwiftAcervo.ComponentDescriptor(
   type: .backbone,
   displayName: "PixArt-Sigma XL DiT (int4)",
   repoId: "intrusive-memory/pixart-sigma-xl-dit-int4-mlx",
-  files: pixArtDiTRequiredFiles,
-  estimatedSizeBytes: 314_572_800,  // ~300 MB int4
   minimumMemoryBytes: 800_000_000,
   metadata: [
     "component_role": "backbone",
@@ -30,8 +21,6 @@ private let pixArtSigmaXLDiTFP16Descriptor = SwiftAcervo.ComponentDescriptor(
   type: .backbone,
   displayName: "PixArt-Sigma XL DiT (fp16)",
   repoId: "intrusive-memory/pixart-sigma-xl-dit-fp16-mlx",
-  files: pixArtDiTRequiredFiles,
-  estimatedSizeBytes: 1_258_291_200,  // ~1.2 GB fp16
   minimumMemoryBytes: 2_500_000_000,
   metadata: [
     "component_role": "backbone",
