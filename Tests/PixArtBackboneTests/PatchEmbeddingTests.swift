@@ -95,42 +95,4 @@ struct PatchEmbeddingTests {
     #expect(tokens.dim(2) == hiddenSize)
   }
 
-  @Test("Patch embedding output ndim is 4")
-  func patchEmbeddingNdim() {
-    let inChannels = 4
-    let hiddenSize = 8
-    let patchSize = 2
-    let patchEmbed = Conv2d(
-      inputChannels: inChannels,
-      outputChannels: hiddenSize,
-      kernelSize: IntOrPair(patchSize),
-      stride: IntOrPair(patchSize),
-      bias: true
-    )
-    let input = MLXArray.zeros([1, 8, 8, inChannels])
-    let output = patchEmbed(input)
-    eval(output)
-    #expect(output.ndim == 4)
-  }
-
-  @Test("Patch embedding with PixArt-Sigma default config dimensions")
-  func patchEmbeddingDefaultConfig() throws {
-    let dit = try PixArtDiT(configuration: PixArtDiTConfiguration())
-    // PixArtDiT stores patchEmbed as a public property (internal Conv2d)
-    // Test the config values are consistent with patch embedding conventions
-    let config = PixArtDiTConfiguration()
-    #expect(config.patchSize == 2)
-    #expect(config.inChannels == 4)
-    #expect(config.hiddenSize == 1152)
-
-    // A 64x64 latent (512x512 image / 8 VAE) with patchSize=2
-    // -> gridH = 32, gridW = 32, tokens = 1024
-    let spatialH = 64
-    let spatialW = 64
-    let gridH = spatialH / config.patchSize
-    let gridW = spatialW / config.patchSize
-    #expect(gridH == 32)
-    #expect(gridW == 32)
-    #expect(gridH * gridW == 1024)
-  }
 }

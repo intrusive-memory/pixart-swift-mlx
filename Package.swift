@@ -39,10 +39,6 @@ let package = Package(
       name: "PixArtBackbone",
       targets: ["PixArtBackbone"]
     ),
-    .executable(
-      name: "PixArtCLI",
-      targets: ["PixArtCLI"]
-    ),
   ],
   dependencies: [
     sibling(
@@ -53,7 +49,6 @@ let package = Package(
       "SwiftAcervo",
       remote: "https://github.com/intrusive-memory/SwiftAcervo.git",
       from: "0.11.1"),
-    .package(url: "https://github.com/apple/swift-argument-parser", from: "1.7.1"),
   ],
   targets: [
     .target(
@@ -62,14 +57,6 @@ let package = Package(
         .product(name: "Tuberia", package: "SwiftTuberia"),
         .product(name: "TuberiaCatalog", package: "SwiftTuberia"),
         .product(name: "SwiftAcervo", package: "SwiftAcervo"),
-      ]
-    ),
-    .executableTarget(
-      name: "PixArtCLI",
-      dependencies: [
-        "PixArtBackbone",
-        .product(name: "SwiftAcervo", package: "SwiftAcervo"),
-        .product(name: "ArgumentParser", package: "swift-argument-parser"),
       ]
     ),
     .testTarget(

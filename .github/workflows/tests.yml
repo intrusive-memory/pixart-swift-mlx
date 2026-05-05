@@ -23,9 +23,25 @@ jobs:
       - name: Show Swift version
         run: swift --version
 
-      - name: Test
+      - name: Test (with coverage)
         run: |
+          mkdir -p Build
           xcodebuild test \
-            -scheme pixart-swift-mlx-Package \
-            -destination 'platform=macOS,arch=arm64'
+            -scheme pixart-swift-mlx \
+            -destination 'platform=macOS,arch=arm64' \
+            -enableCodeCoverage YES \
+            -resultBundlePath Build/test.xcresult
+
+      - name: Coverage summary
+        run: |
+          echo "PixArtBackbone target line coverage:"
+          xcrun xccov view --report --only-targets Build/test.xcresult | grep -E "PixArtBackbone\b" || echo "(target not found in coverage report)"
+
+      - name: Upload coverage result bundle
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-coverage
+          path: Build/test.xcresult
+          retention-days: 14
 

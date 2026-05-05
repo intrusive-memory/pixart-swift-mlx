@@ -11,8 +11,7 @@
 pixart-swift-mlx
 ├──▶ SwiftTubería/Tubería          (protocols: Backbone, WeightedSegment)
 ├──▶ SwiftTubería/TuberíaCatalog   (components: T5XXLEncoder, SDXLVAEDecoder, DPMSolverScheduler, ImageRenderer)
-├──▶ SwiftAcervo                   (direct: component registration)
-└──▶ swift-argument-parser         (CLI only)
+└──▶ SwiftAcervo                   (direct: component registration)
 ```
 
 ---
@@ -27,7 +26,6 @@ pixart-swift-mlx
 | Conv2d tensor transform | ~10 | via `WeightedSegment.tensorTransform` |
 | `PixArtRecipe` | ~20 | `PipelineRecipe` |
 | Acervo descriptors | ~30 | `ComponentDescriptor` registration |
-| `PixArtCLI` | ~50 | CLI tool |
 
 **Everything else comes from SwiftTubería.**
 

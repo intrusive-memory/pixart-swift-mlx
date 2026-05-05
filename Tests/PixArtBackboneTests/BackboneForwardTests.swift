@@ -4,6 +4,26 @@ import Tuberia
 
 @testable import PixArtBackbone
 
+// MARK: - Shared Fixture (R2.13)
+//
+// PixArtDiT.init constructs 28 DiT blocks with hiddenSize=1152 — ~600M parameters
+// allocated per cold init. Each test in this suite previously rebuilt a fresh
+// instance, paying that cost N times per CI run. The fixture below is initialized
+// once (Swift guarantees thread-safe lazy init for static stored properties) and
+// reused across every test that doesn't need to mutate the module.
+//
+// Tests that need an isolated instance (e.g. checking that init invariants run
+// per-construction) can still call `try PixArtDiT(configuration:)` directly.
+enum BackboneFixture {
+  static let dit: PixArtDiT = {
+    do {
+      return try PixArtDiT(configuration: PixArtDiTConfiguration())
+    } catch {
+      fatalError("Failed to build shared PixArtDiT fixture: \(error)")
+    }
+  }()
+}
+
 // MARK: - Backbone Forward Pass Tests
 
 /// Tests the full PixArtDiT forward pass with synthetic (zero) inputs.
@@ -23,24 +43,21 @@ import Tuberia
 ///
 /// Note: The latent spatial dimensions must be divisible by patchSize (2).
 /// Minimum valid latent is [1, 2, 2, 4] → output [1, 2, 2, 4].
-@Suite("BackboneForward")
+@Suite("BackboneForward", .serialized)
 struct BackboneForwardTests {
 
   // MARK: - Output Shape Tests
 
-  @Test("Forward pass output shape is [B, H, W, 4] for batch size 1")
-  func outputShapeBatch1() throws {
-    let config = PixArtDiTConfiguration()
-    let dit = try PixArtDiT(configuration: config)
+  @Test("Forward pass output shape is [B, H, W, outputLatentChannels] and matches input spatial dims")
+  func outputShapeContract() throws {
+    // Use the shared fixture (R2.13) to amortize the 28-block init cost.
+    let dit = BackboneFixture.dit
 
     // Minimal latent: [1, 4, 4, 4] — 4x4 spatial, 4 channels
     // gridH = 4/2 = 2, gridW = 4/2 = 2 → 4 tokens through the transformer
     let latents = MLXArray.zeros([1, 4, 4, 4])
-    // Conditioning: [1, 120, 4096] — 120 text tokens (maxTextLength), captionChannels=4096
     let conditioning = MLXArray.zeros([1, 120, 4096])
-    // Conditioning mask: [1, 120] — all tokens valid
     let conditioningMask = MLXArray.ones([1, 120])
-    // Timestep: [1] — scalar timestep per batch element
     let timestep = MLXArray([500 as Float])
 
     let input = BackboneInput(
@@ -53,107 +70,24 @@ struct BackboneForwardTests {
     let output = try dit.forward(input)
     eval(output)
 
+    // Full shape contract pinned in one place:
+    // - 4-D
+    // - Batch and spatial dims preserved
+    // - Channel dim equals outputLatentChannels (variance channels discarded)
+    // - outputLatentChannels protocol property matches actual output
     #expect(output.ndim == 4, "Output must be 4-dimensional [B, H, W, C]")
-    #expect(output.dim(0) == 1, "Batch dimension must be 1")
-    #expect(output.dim(1) == 4, "Spatial height must match latent height (4)")
-    #expect(output.dim(2) == 4, "Spatial width must match latent width (4)")
-    #expect(output.dim(3) == 4, "Channel dimension must be 4 (variance discarded)")
-  }
-
-  @Test("Forward pass output shape matches [B, H, W, 4] contract")
-  func outputShapeContractVerified() throws {
-    let config = PixArtDiTConfiguration()
-    let dit = try PixArtDiT(configuration: config)
-
-    // Use the smallest valid latent: 2 * patchSize = 4 in each spatial dim
-    let spatialH = 4
-    let spatialW = 4
-    let B = 1
-
-    let latents = MLXArray.zeros([B, spatialH, spatialW, config.inChannels])
-    let conditioning = MLXArray.zeros([B, config.maxTextLength, config.captionChannels])
-    let conditioningMask = MLXArray.ones([B, config.maxTextLength])
-    let timestep = MLXArray([250 as Float])
-
-    let input = BackboneInput(
-      latents: latents,
-      conditioning: conditioning,
-      conditioningMask: conditioningMask,
-      timestep: timestep
-    )
-
-    let output = try dit.forward(input)
-    eval(output)
-
-    // Shape contract: [B, spatialH, spatialW, outputLatentChannels]
-    #expect(output.shape == [B, spatialH, spatialW, dit.outputLatentChannels])
-  }
-
-  @Test("Forward pass output has 4 channels — variance channels are discarded")
-  func outputHasFourChannels() throws {
-    let dit = try PixArtDiT(configuration: PixArtDiTConfiguration())
-
-    let input = BackboneInput(
-      latents: MLXArray.zeros([1, 4, 4, 4]),
-      conditioning: MLXArray.zeros([1, 120, 4096]),
-      conditioningMask: MLXArray.ones([1, 120]),
-      timestep: MLXArray([999 as Float])
-    )
-
-    let output = try dit.forward(input)
-    eval(output)
-
-    // outChannels=8 internally, but forward() slices [0..<4] before returning
-    #expect(output.dim(3) == 4)
-    #expect(dit.outputLatentChannels == 4)
-  }
-
-  @Test("Forward pass output ndim is exactly 4")
-  func outputNdimIs4() throws {
-    let dit = try PixArtDiT(configuration: PixArtDiTConfiguration())
-
-    let input = BackboneInput(
-      latents: MLXArray.zeros([1, 4, 4, 4]),
-      conditioning: MLXArray.zeros([1, 120, 4096]),
-      conditioningMask: MLXArray.ones([1, 120]),
-      timestep: MLXArray([100 as Float])
-    )
-
-    let output = try dit.forward(input)
-    eval(output)
-
-    #expect(output.ndim == 4)
-  }
-
-  // MARK: - Spatial Dimension Preservation
-
-  @Test("Output spatial dimensions match input latent spatial dimensions")
-  func spatialDimensionsPreserved() throws {
-    let dit = try PixArtDiT(configuration: PixArtDiTConfiguration())
-
-    // Use 4x4 latent — gridH = 4/2 = 2, gridW = 4/2 = 2
-    // FinalLayer unpatchifies back to 4x4 with outChannels=8, then [0..<4] gives 4ch
-    let latents = MLXArray.zeros([1, 4, 4, 4])
-    let input = BackboneInput(
-      latents: latents,
-      conditioning: MLXArray.zeros([1, 120, 4096]),
-      conditioningMask: MLXArray.ones([1, 120]),
-      timestep: MLXArray([500 as Float])
-    )
-
-    let output = try dit.forward(input)
-    eval(output)
-
-    // Spatial dimensions must be preserved through patch → unpatching cycle
+    #expect(output.dim(0) == latents.dim(0), "Batch must be preserved")
     #expect(output.dim(1) == latents.dim(1), "Height must be preserved")
     #expect(output.dim(2) == latents.dim(2), "Width must be preserved")
+    #expect(output.dim(3) == 4, "Channel dimension must be 4 (variance channels discarded)")
+    #expect(output.dim(3) == dit.outputLatentChannels, "Output channel count must match outputLatentChannels protocol property")
   }
 
   // MARK: - Attention Mask
 
   @Test("Forward pass with partial attention mask produces correct output shape")
   func forwardWithAttentionMask() throws {
-    let dit = try PixArtDiT(configuration: PixArtDiTConfiguration())
+    let dit = BackboneFixture.dit
 
     // Mask: first 60 tokens valid, last 60 are padding
     let maskData = [Int32](repeating: 1, count: 60) + [Int32](repeating: 0, count: 60)
@@ -172,26 +106,6 @@ struct BackboneForwardTests {
     #expect(output.shape == [1, 4, 4, 4])
   }
 
-  // MARK: - Protocol Conformance
-
-  @Test("PixArtDiT outputLatentChannels matches forward output channel count")
-  func outputLatentChannelsMatchesForward() throws {
-    let dit = try PixArtDiT(configuration: PixArtDiTConfiguration())
-
-    let input = BackboneInput(
-      latents: MLXArray.zeros([1, 4, 4, 4]),
-      conditioning: MLXArray.zeros([1, 120, 4096]),
-      conditioningMask: MLXArray.ones([1, 120]),
-      timestep: MLXArray([500 as Float])
-    )
-
-    let output = try dit.forward(input)
-    eval(output)
-
-    // The protocol property and the actual output channel count must agree
-    #expect(output.dim(3) == dit.outputLatentChannels)
-  }
-
   // MARK: - Full 1024×1024 Latent Shape
 
   /// Verifies the forward pass with the canonical 1024×1024 VAE latent shape.
@@ -208,8 +122,7 @@ struct BackboneForwardTests {
     .timeLimit(.minutes(5))
   )
   func forwardPassWith1024LatentShape() throws {
-    let config = PixArtDiTConfiguration()
-    let dit = try PixArtDiT(configuration: config)
+    let dit = BackboneFixture.dit
 
     // Canonical 1024×1024 VAE latent (SDXL 8× downsampling: 1024/8 = 128)
     let latents = MLXArray.zeros([1, 128, 128, 4])

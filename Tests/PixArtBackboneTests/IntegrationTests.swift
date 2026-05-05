@@ -12,7 +12,7 @@
   // They are NOT run in CI. To run locally:
   //
   //   xcodebuild test \
-  //     -scheme pixart-swift-mlx-Package \
+  //     -scheme pixart-swift-mlx \
   //     -destination 'platform=macOS,arch=arm64' \
   //     SWIFT_ACTIVE_COMPILATION_CONDITIONS=INTEGRATION_TESTS
   //

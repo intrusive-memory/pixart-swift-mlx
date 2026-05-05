@@ -28,19 +28,6 @@ struct FinalLayerTests {
     #expect(result.dim(3) == outChannels)
   }
 
-  @Test("FinalLayer output ndim is 4 (spatial output)")
-  func outputNdim() {
-    let hiddenSize = 16
-    let patchSize = 2
-    let outChannels = 8
-    let layer = FinalLayer(hiddenSize: hiddenSize, patchSize: patchSize, outChannels: outChannels)
-    let x = MLXArray.zeros([1, 4, hiddenSize])
-    let t = MLXArray.zeros([1, hiddenSize])
-    let result = layer(x, t: t, gridH: 2, gridW: 2)
-    eval(result)
-    #expect(result.ndim == 4)
-  }
-
   @Test("FinalLayer variance channel handling: outChannels=8 includes variance channels")
   func varianceChannels() {
     // PixArt outputs 8 channels (4 noise + 4 variance); caller discards [4..7]

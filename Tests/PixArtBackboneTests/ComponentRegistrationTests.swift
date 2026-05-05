@@ -1,3 +1,4 @@
+import SwiftAcervo
 import Testing
 import TuberiaCatalog
 
@@ -41,22 +42,47 @@ struct ComponentRegistrationTests {
     #expect(ids.count == 3)
   }
 
-  @Test("DiT component ID matches recipe")
-  func ditComponentIdMatchesRecipe() throws {
-    let recipe = PixArtRecipe()
-    let ids = recipe.allComponentIds
-    #expect(ids.contains("pixart-sigma-xl-dit-int4"))
+  // MARK: - FP16 backbone descriptor (R2.8)
+
+  @Test("FP16 DiT backbone descriptor is registered")
+  func fp16DiTComponentRegistered() {
+    _ = PixArtComponents.registered
+    #expect(Acervo.component("pixart-sigma-xl-dit-fp16") != nil)
   }
 
-  @Test("Encoder component ID matches recipe")
-  func encoderComponentIdMatchesRecipe() {
-    let recipe = PixArtRecipe()
-    #expect(recipe.encoderConfig.componentId == "t5-xxl-encoder-int4")
+  // MARK: - Descriptor metadata field pins (R2.8)
+
+  @Test("int4 DiT descriptor has expected repoId and metadata")
+  func int4DescriptorFields() throws {
+    _ = PixArtComponents.registered
+    let descriptor = try #require(Acervo.component("pixart-sigma-xl-dit-int4"))
+    #expect(descriptor.repoId == "intrusive-memory/pixart-sigma-xl-dit-int4-mlx")
+    #expect(descriptor.minimumMemoryBytes == 800_000_000)
+    #expect(descriptor.metadata["component_role"] == "backbone")
+    #expect(descriptor.metadata["quantization"] == "int4")
+    #expect(descriptor.metadata["architecture"] == "DiT-XL")
   }
 
-  @Test("Decoder component ID matches recipe")
-  func decoderComponentIdMatchesRecipe() {
-    let recipe = PixArtRecipe()
-    #expect(recipe.decoderConfig.componentId == "sdxl-vae-decoder-fp16")
+  @Test("fp16 DiT descriptor has expected repoId and metadata")
+  func fp16DescriptorFields() throws {
+    _ = PixArtComponents.registered
+    let descriptor = try #require(Acervo.component("pixart-sigma-xl-dit-fp16"))
+    #expect(descriptor.repoId == "intrusive-memory/pixart-sigma-xl-dit-fp16-mlx")
+    #expect(descriptor.minimumMemoryBytes == 2_500_000_000)
+    #expect(descriptor.metadata["component_role"] == "backbone")
+    #expect(descriptor.metadata["quantization"] == "fp16")
+    #expect(descriptor.metadata["architecture"] == "DiT-XL")
+  }
+
+  // MARK: - Idempotency (R2.8)
+
+  @Test("Repeated calls to PixArtComponents.registered are idempotent")
+  func registeredIsIdempotent() {
+    let first = PixArtComponents.registered
+    let second = PixArtComponents.registered
+    #expect(first == true)
+    #expect(second == true)
+    #expect(Acervo.component("pixart-sigma-xl-dit-int4") != nil)
+    #expect(Acervo.component("pixart-sigma-xl-dit-fp16") != nil)
   }
 }

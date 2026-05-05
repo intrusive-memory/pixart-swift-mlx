@@ -2,7 +2,7 @@
 
 This file provides comprehensive documentation for AI agents working with the pixart-swift-mlx codebase.
 
-**Version**: 0.5.2-dev
+**Version**: 0.5.3-dev
 **Purpose**: Guide AI agents working on pixart-swift-mlx
 **Audience**: Claude Code, Gemini, and other AI development assistants
 
@@ -28,7 +28,6 @@ T5XXLEncoder (catalog) -> PixArtDiT (this repo) -> SDXLVAEDecoder (catalog) -> I
 - LoRA target layer declarations
 - Pipeline recipe assembly
 - Weight conversion scripts
-- CLI tool (`PixArtCLI`)
 
 **~400 lines of model-specific code total.**
 
@@ -49,10 +48,8 @@ T5XXLEncoder (catalog) -> PixArtDiT (this repo) -> SDXLVAEDecoder (catalog) -> I
 This project uses a Makefile. Available targets:
 
 ```bash
-make resolve   # Resolve SPM dependencies
-make build     # Debug build
-make install   # Debug build + copy PixArtCLI binary to ./bin
-make release   # Release build + copy binary to ./bin
+make resolve      # Resolve SPM dependencies
+make build        # Debug build
 make test         # Run Swift unit tests
 make test-python  # Run Python conversion script tests
 make test-all     # Run all tests (Swift + Python)
@@ -75,7 +72,7 @@ make help         # Show all targets
 This package depends on [SwiftAcervo](https://github.com/intrusive-memory/SwiftAcervo) for shared model storage. SwiftAcervo v0.10.0 resolves its App Group ID in this order: `ACERVO_APP_GROUP_ID` env var → `com.apple.security.application-groups` entitlement (macOS only) → `fatalError`. There is **no silent fallback**.
 
 - **Signed UI apps (macOS / iOS)**: declare `com.apple.security.application-groups` with `group.intrusive-memory.models` in your `.entitlements` file. iOS apps additionally need `ACERVO_APP_GROUP_ID=group.intrusive-memory.models` in the launch environment.
-- **CLI tools, scripts, CI jobs, test runners**: export `ACERVO_APP_GROUP_ID=group.intrusive-memory.models` in the shell or job environment. The standard place is `~/.zprofile`:
+- **Scripts, CI jobs, test runners**: export `ACERVO_APP_GROUP_ID=group.intrusive-memory.models` in the shell or job environment. The standard place is `~/.zprofile`:
 
     ```sh
     export ACERVO_APP_GROUP_ID=group.intrusive-memory.models
