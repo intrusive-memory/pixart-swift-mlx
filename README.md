@@ -12,7 +12,6 @@ Provides the PixArt-Sigma DiT (Diffusion Transformer) backbone for the SwiftTube
 - Weight key mapping (PyTorch → MLX safetensors)
 - Acervo component descriptors for model registration
 - Pipeline recipe (T5 + DPM + PixArtDiT + SDXL VAE + ImageRenderer)
-- CLI tool for image generation (`PixArtCLI`)
 - Weight conversion scripts (PyTorch -> int4/fp16 MLX safetensors)
 - ~2 GB total pipeline (int4 quantized), iPad-viable
 
@@ -29,7 +28,7 @@ Add to your `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/intrusive-memory/pixart-swift-mlx.git", from: "0.5.2")
+    .package(url: "https://github.com/intrusive-memory/pixart-swift-mlx.git", from: "0.6.0")
 ]
 ```
 
@@ -45,7 +44,6 @@ Then add the dependency to your target:
 
 ```bash
 make build     # Debug build
-make install   # Build + install PixArtCLI to ./bin
 make test      # Run Swift tests
 make test-all  # Run all tests (Swift + Python)
 make lint      # Format Swift sources
@@ -57,7 +55,7 @@ make help      # Show all targets
 This package depends on [SwiftAcervo](https://github.com/intrusive-memory/SwiftAcervo) for shared model storage. SwiftAcervo v0.10.0 resolves its App Group ID in this order: `ACERVO_APP_GROUP_ID` env var → `com.apple.security.application-groups` entitlement (macOS only) → `fatalError`. There is **no silent fallback**.
 
 - **Signed UI apps (macOS / iOS)**: declare `com.apple.security.application-groups` with `group.intrusive-memory.models` in your `.entitlements` file. iOS apps additionally need `ACERVO_APP_GROUP_ID=group.intrusive-memory.models` in the launch environment.
-- **CLI tools, scripts, CI jobs, test runners**: export `ACERVO_APP_GROUP_ID=group.intrusive-memory.models` in the shell or job environment. The standard place is `~/.zprofile`:
+- **Scripts, CI jobs, test runners**: export `ACERVO_APP_GROUP_ID=group.intrusive-memory.models` in the shell or job environment. The standard place is `~/.zprofile`:
 
     ```sh
     export ACERVO_APP_GROUP_ID=group.intrusive-memory.models

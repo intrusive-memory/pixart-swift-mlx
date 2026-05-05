@@ -2,4 +2,4 @@
 // PixArtBackbone: DiT transformer, weight key mapping, pipeline recipe
 
 /// PixArt-Sigma backbone library version.
-public let version = "0.5.3"
+public let version = "0.6.0"

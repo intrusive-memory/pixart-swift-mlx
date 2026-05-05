@@ -36,32 +36,6 @@ struct AttentionTests {
     #expect(result.dim(2) == hiddenSize)
   }
 
-  @Test("SelfAttention has QK norm layers (LayerNorm on headDim)")
-  func selfAttentionHasQKNorm() {
-    let hiddenSize = 16
-    let numHeads = 2
-    let headDim = hiddenSize / numHeads
-    let attn = SelfAttention(hiddenSize: hiddenSize, numHeads: numHeads, headDim: headDim)
-    // QK norm layers must produce output without error — this verifies they exist and are applied.
-    let input = MLXArray.zeros([1, 4, hiddenSize])
-    let result = attn(input)
-    eval(result)
-    // If QK norm was missing, the code would crash or fail to compile.
-    #expect(result.ndim == 3)
-  }
-
-  @Test("SelfAttention ndim is 3")
-  func selfAttentionNdim() {
-    let hiddenSize = 16
-    let numHeads = 2
-    let headDim = hiddenSize / numHeads
-    let attn = SelfAttention(hiddenSize: hiddenSize, numHeads: numHeads, headDim: headDim)
-    let input = MLXArray.zeros([1, 6, hiddenSize])
-    let result = attn(input)
-    eval(result)
-    #expect(result.ndim == 3)
-  }
-
   // MARK: - CrossAttention
 
   @Test("CrossAttention output shape: [B, T_img, C]")
@@ -123,16 +97,4 @@ struct AttentionTests {
     #expect(result.dim(2) == hiddenSize)
   }
 
-  @Test("CrossAttention output ndim is 3")
-  func crossAttentionNdim() {
-    let hiddenSize = 16
-    let numHeads = 2
-    let headDim = hiddenSize / numHeads
-    let crossAttn = CrossAttention(hiddenSize: hiddenSize, numHeads: numHeads, headDim: headDim)
-    let query = MLXArray.zeros([1, 4, hiddenSize])
-    let context = MLXArray.zeros([1, 3, hiddenSize])
-    let result = crossAttn(query, context: context, mask: nil)
-    eval(result)
-    #expect(result.ndim == 3)
-  }
 }

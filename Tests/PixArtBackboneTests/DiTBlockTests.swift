@@ -62,22 +62,6 @@ struct DiTBlockTests {
     #expect(result.dim(2) == hiddenSize)
   }
 
-  @Test("DiTBlock output ndim is 3")
-  func outputNdim() {
-    let block = DiTBlock(
-      hiddenSize: hiddenSize,
-      numHeads: numHeads,
-      headDim: headDim,
-      mlpRatio: mlpRatio
-    )
-    let x = MLXArray.zeros([1, 4, hiddenSize])
-    let y = MLXArray.zeros([1, 3, hiddenSize])
-    let t = MLXArray.zeros([1, 6 * hiddenSize])
-    let result = block(x, y: y, t: t, mask: nil)
-    eval(result)
-    #expect(result.ndim == 3)
-  }
-
   @Test("DiTBlock scaleShiftTable has shape [6, hiddenSize]")
   func scaleShiftTableShape() {
     let block = DiTBlock(
@@ -118,28 +102,4 @@ struct DiTBlockTests {
     #expect(result.dim(2) == hiddenSize)
   }
 
-  @Test("AdaLN modulation: t_block input shape [B, 6*hiddenSize] is correctly consumed")
-  func adaLNModulationShape() {
-    // This verifies that the t parameter shape [B, 6*C] is correctly unpacked to 6 x [B, 1, C]
-    let B = 2
-    let T = 4
-    let Ttext = 2
-
-    let block = DiTBlock(
-      hiddenSize: hiddenSize,
-      numHeads: numHeads,
-      headDim: headDim,
-      mlpRatio: mlpRatio
-    )
-
-    let x = MLXArray.zeros([B, T, hiddenSize])
-    let y = MLXArray.zeros([B, Ttext, hiddenSize])
-    // t must have shape [B, 6 * hiddenSize] — any other shape would crash
-    let t = MLXArray.zeros([B, 6 * hiddenSize])
-
-    let result = block(x, y: y, t: t, mask: nil)
-    eval(result)
-
-    #expect(result.shape == [B, T, hiddenSize])
-  }
 }

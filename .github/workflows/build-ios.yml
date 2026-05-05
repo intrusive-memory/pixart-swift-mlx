@@ -26,5 +26,5 @@ jobs:
       - name: Build for iOS Simulator
         run: |
           xcodebuild build \
-            -scheme pixart-swift-mlx-Package \
+            -scheme pixart-swift-mlx \
             -destination 'platform=iOS Simulator,name=iPhone 17,OS=26.1'

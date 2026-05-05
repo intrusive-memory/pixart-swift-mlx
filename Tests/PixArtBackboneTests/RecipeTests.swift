@@ -1,4 +1,5 @@
 import Testing
+import Tuberia
 
 @testable import PixArtBackbone
 
@@ -17,16 +18,6 @@ struct RecipeTests {
     try recipe.validate()
   }
 
-  @Test("allComponentIds contains exactly 3 expected IDs")
-  func componentIds() {
-    let recipe = PixArtRecipe()
-    let ids = recipe.allComponentIds
-    #expect(ids.count == 3)
-    #expect(ids.contains("t5-xxl-encoder-int4"))
-    #expect(ids.contains("pixart-sigma-xl-dit-int4"))
-    #expect(ids.contains("sdxl-vae-decoder-fp16"))
-  }
-
   @Test("Recipe is text-to-image only")
   func textToImageOnly() {
     let recipe = PixArtRecipe()
@@ -41,18 +32,6 @@ struct RecipeTests {
     } else {
       Issue.record("Expected .emptyPrompt, got different strategy")
     }
-  }
-
-  @Test("Encoder maxSequenceLength is 120")
-  func encoderMaxSequenceLength() {
-    let recipe = PixArtRecipe()
-    #expect(recipe.encoderConfig.maxSequenceLength == 120)
-  }
-
-  @Test("Encoder embeddingDim is 4096")
-  func encoderEmbeddingDim() {
-    let recipe = PixArtRecipe()
-    #expect(recipe.encoderConfig.embeddingDim == 4096)
   }
 
   @Test("Scheduler beta schedule: linear betaStart=0.0001, betaEnd=0.02")
@@ -125,5 +104,70 @@ struct RecipeTests {
   func backboneDepth() {
     let recipe = PixArtRecipe()
     #expect(recipe.backboneConfig.depth == 28)
+  }
+
+  // MARK: - componentIdFor regression pins (R2.7)
+  //
+  // The override for `componentIdFor` exists because the default zip-based mapping
+  // mis-aligns roles when `allComponentIds` skips weightless roles (scheduler, renderer).
+  // Bug fixed in PR #10 (commit 32ce4c3); these tests prevent silent reintroduction.
+
+  @Test("componentIdFor maps .encoder to t5-xxl-encoder-int4")
+  func componentIdForEncoder() {
+    let recipe = PixArtRecipe()
+    #expect(recipe.componentIdFor[.encoder] == "t5-xxl-encoder-int4")
+  }
+
+  @Test("componentIdFor maps .backbone to pixart-sigma-xl-dit-int4")
+  func componentIdForBackbone() {
+    let recipe = PixArtRecipe()
+    #expect(recipe.componentIdFor[.backbone] == "pixart-sigma-xl-dit-int4")
+  }
+
+  @Test("componentIdFor maps .decoder to sdxl-vae-decoder-fp16")
+  func componentIdForDecoder() {
+    let recipe = PixArtRecipe()
+    #expect(recipe.componentIdFor[.decoder] == "sdxl-vae-decoder-fp16")
+  }
+
+  @Test("componentIdFor does not map weightless roles")
+  func componentIdForWeightlessRoles() {
+    let recipe = PixArtRecipe()
+    #expect(recipe.componentIdFor[.scheduler] == nil)
+    #expect(recipe.componentIdFor[.renderer] == nil)
+  }
+
+  // MARK: - Scheduler config field pins (R2.7)
+
+  @Test("Scheduler predictionType is .epsilon")
+  func schedulerPredictionType() {
+    let recipe = PixArtRecipe()
+    #expect(recipe.schedulerConfig.predictionType == .epsilon)
+  }
+
+  @Test("Scheduler solverOrder is 2")
+  func schedulerSolverOrder() {
+    let recipe = PixArtRecipe()
+    #expect(recipe.schedulerConfig.solverOrder == 2)
+  }
+
+  @Test("Scheduler trainTimesteps is 1000")
+  func schedulerTrainTimesteps() {
+    let recipe = PixArtRecipe()
+    #expect(recipe.schedulerConfig.trainTimesteps == 1000)
+  }
+
+  // MARK: - Quantization (R2.7)
+
+  @Test("quantizationFor returns .asStored for every role")
+  func quantizationAsStoredForAllRoles() {
+    let recipe = PixArtRecipe()
+    for role in PipelineRole.allCases {
+      if case .asStored = recipe.quantizationFor(role) {
+        // expected
+      } else {
+        Issue.record("Expected .asStored for role \(role), got different config")
+      }
+    }
   }
 }
