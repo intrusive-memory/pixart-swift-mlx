@@ -208,8 +208,10 @@ struct EmbeddingsTests {
     let actual = scalarAt(result, 0, 1)
     // Loose tolerance: cos(100) lives on a fast-rotating phase; float32 path
     // through MLX exp/mul accumulates ~1e-3 error.
-    #expect(abs(actual - expected) < 1e-3,
-            "expected cos(100)=\(expected), got \(actual). If regressed to halfDim-1, would be ~cos(1)=0.5403.")
+    #expect(
+      abs(actual - expected) < 1e-3,
+      "expected cos(100)=\(expected), got \(actual). If regressed to halfDim-1, would be ~cos(1)=0.5403."
+    )
   }
 
   // MARK: sinusoidalEmbedding1D order pin
@@ -262,14 +264,14 @@ struct EmbeddingsTests {
 
     // At (h=0, w=1): first 4 dims are W's embedding for position 0.5 (sin-first),
     // last 4 dims are H's embedding for position 0 = [0,0,1,1].
-    #expect(abs(scalarAt3D(result, 0, 1, 0) - Foundation.sin(Float(0.5))) < tol)   // W sin(0.5)
-    #expect(abs(scalarAt3D(result, 0, 1, 1) - Foundation.sin(Float(0.005))) < tol) // W sin(0.005)
-    #expect(abs(scalarAt3D(result, 0, 1, 2) - Foundation.cos(Float(0.5))) < tol)   // W cos(0.5)
-    #expect(abs(scalarAt3D(result, 0, 1, 3) - Foundation.cos(Float(0.005))) < tol) // W cos(0.005)
-    #expect(abs(scalarAt3D(result, 0, 1, 4) - 0.0) < tol)                           // H sin(0)
-    #expect(abs(scalarAt3D(result, 0, 1, 5) - 0.0) < tol)                           // H sin(0)
-    #expect(abs(scalarAt3D(result, 0, 1, 6) - 1.0) < tol)                           // H cos(0)
-    #expect(abs(scalarAt3D(result, 0, 1, 7) - 1.0) < tol)                           // H cos(0)
+    #expect(abs(scalarAt3D(result, 0, 1, 0) - Foundation.sin(Float(0.5))) < tol)  // W sin(0.5)
+    #expect(abs(scalarAt3D(result, 0, 1, 1) - Foundation.sin(Float(0.005))) < tol)  // W sin(0.005)
+    #expect(abs(scalarAt3D(result, 0, 1, 2) - Foundation.cos(Float(0.5))) < tol)  // W cos(0.5)
+    #expect(abs(scalarAt3D(result, 0, 1, 3) - Foundation.cos(Float(0.005))) < tol)  // W cos(0.005)
+    #expect(abs(scalarAt3D(result, 0, 1, 4) - 0.0) < tol)  // H sin(0)
+    #expect(abs(scalarAt3D(result, 0, 1, 5) - 0.0) < tol)  // H sin(0)
+    #expect(abs(scalarAt3D(result, 0, 1, 6) - 1.0) < tol)  // H cos(0)
+    #expect(abs(scalarAt3D(result, 0, 1, 7) - 1.0) < tol)  // H cos(0)
 
     // At (h=0, w=0): both halves are zero-position embeddings = [0,0,1,1, 0,0,1,1].
     #expect(abs(scalarAt3D(result, 0, 0, 0) - 0.0) < tol)
@@ -303,8 +305,10 @@ struct EmbeddingsTests {
     for i in probeIndices {
       let lhs = scalarAt(result, 0, i)
       let rhs = scalarAt(result, 0, i + outputDimPerAxis)
-      #expect(abs(lhs - rhs) < tol,
-              "SizeEmbedder halves diverged at offset \(i): \(lhs) vs \(rhs). Did it stop sharing the MLP?")
+      #expect(
+        abs(lhs - rhs) < tol,
+        "SizeEmbedder halves diverged at offset \(i): \(lhs) vs \(rhs). Did it stop sharing the MLP?"
+      )
     }
   }
 

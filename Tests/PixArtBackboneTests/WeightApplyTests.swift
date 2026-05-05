@@ -156,7 +156,10 @@ struct WeightApplyTests {
     let maxAbs = abs(diff).max().item(Float.self)
     // int4 quantization has visible error; 0.5 is a generous bound that still
     // catches catastrophic regressions (e.g. wrong groupSize or bits).
-    #expect(maxAbs < 0.5, "int4 round-trip max absolute error \(maxAbs) >= 0.5 — likely a regression in groupSize/bits or the dequant kernel")
+    #expect(
+      maxAbs < 0.5,
+      "int4 round-trip max absolute error \(maxAbs) >= 0.5 — likely a regression in groupSize/bits or the dequant kernel"
+    )
   }
 
   @Test("apply(weights:) accepts int4-quantized weight + scales + biases sidecars without error")
@@ -175,7 +178,10 @@ struct WeightApplyTests {
     let w = MLXArray(values).reshaped(outDim, inDim).asType(.float16)
     let quant = quantized(w, groupSize: 64, bits: 4)
 
-    #expect(quant.wq.dtype == .uint32, "MLX.quantized must produce uint32 packed weights for the int4 path to engage in apply(weights:)")
+    #expect(
+      quant.wq.dtype == .uint32,
+      "MLX.quantized must produce uint32 packed weights for the int4 path to engage in apply(weights:)"
+    )
 
     let biases = try #require(quant.biases)
 

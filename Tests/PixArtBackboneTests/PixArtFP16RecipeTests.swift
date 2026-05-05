@@ -59,7 +59,8 @@ struct PixArtFP16RecipeTests {
       #expect(abs(betaStart - 0.0001) < 1e-7)
       #expect(abs(betaEnd - 0.02) < 1e-7)
     } else {
-      let message = "Expected .scaledLinear schedule (current source). If you've changed the schedule, update this test AND the doc comment in PixArtFP16Recipe.swift line 61."
+      let message =
+        "Expected .scaledLinear schedule (current source). If you've changed the schedule, update this test AND the doc comment in PixArtFP16Recipe.swift line 61."
       Issue.record(Comment(rawValue: message))
     }
   }
@@ -145,7 +146,9 @@ struct PixArtFP16RecipeTests {
     #expect(!recipe.allComponentIds.contains("pixart-sigma-xl-dit-int4"))
   }
 
-  @Test("allComponentIds is exactly [t5-xxl-encoder-int4, pixart-sigma-xl-dit-fp16, sdxl-vae-decoder-fp16]")
+  @Test(
+    "allComponentIds is exactly [t5-xxl-encoder-int4, pixart-sigma-xl-dit-fp16, sdxl-vae-decoder-fp16]"
+  )
   func allComponentIdsExactOrder() {
     let recipe = PixArtFP16Recipe()
     #expect(

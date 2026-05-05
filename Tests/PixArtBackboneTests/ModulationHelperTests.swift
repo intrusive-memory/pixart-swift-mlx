@@ -110,7 +110,8 @@ struct ModulationHelperTests {
     // Direct check: apply the published gelu_new formula and compare to MLXNN's
     // geluApproximate on a known input vector.
     let probe = MLXArray([-2.0, -0.5, 0.0, 0.5, 2.0] as [Float])
-    let manual = probe * 0.5 * (1.0 + MLX.tanh(0.7978845608 * (probe + 0.044715 * probe * probe * probe)))
+    let manual =
+      probe * 0.5 * (1.0 + MLX.tanh(0.7978845608 * (probe + 0.044715 * probe * probe * probe)))
     eval(manual)
 
     // Manual reference values (computed from formula, double precision):
@@ -122,7 +123,9 @@ struct ModulationHelperTests {
     let expected: [Float] = [-0.04540, -0.15428, 0.0, 0.34571, 1.95459]
     let actual = manual.asArray(Float.self)
     for (a, e) in zip(actual, expected) {
-      #expect(abs(a - e) < 1e-3, "Manual gelu_new value \(a) differs from reference \(e) by more than 1e-3")
+      #expect(
+        abs(a - e) < 1e-3,
+        "Manual gelu_new value \(a) differs from reference \(e) by more than 1e-3")
     }
   }
 

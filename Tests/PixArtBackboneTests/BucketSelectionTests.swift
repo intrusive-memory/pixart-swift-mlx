@@ -19,7 +19,8 @@ struct BucketSelectionTests {
     // canonical 1024x1024 bucket sits at ~1.05M. Pinning a wide envelope here.
     for (i, bucket) in PixArtDiTConfiguration.aspectRatioBuckets.enumerated() {
       let total = bucket.width * bucket.height
-      #expect(total >= 500_000 && total <= 1_200_000,
+      #expect(
+        total >= 500_000 && total <= 1_200_000,
         "Bucket \(i) (\(bucket)) total \(total) is outside [500K, 1.2M] envelope")
     }
   }
@@ -48,19 +49,22 @@ struct BucketSelectionTests {
   @Test("nearestBucket prefers landscape for landscape requests")
   func nearestBucketLandscape() {
     let bucket = PixArtDiTConfiguration.nearestBucket(width: 1920, height: 1080)
-    #expect(bucket.width >= bucket.height,
+    #expect(
+      bucket.width >= bucket.height,
       "Expected landscape (w>=h) for 1920x1080 request, got \(bucket)")
     let ar = Float(bucket.width) / Float(bucket.height)
     let targetAR: Float = 1920.0 / 1080.0
     // Closest table entry should be within ±0.05 AR of target
-    #expect(abs(ar - targetAR) < 0.05,
+    #expect(
+      abs(ar - targetAR) < 0.05,
       "Returned bucket AR \(ar) differs from target \(targetAR) by more than 0.05")
   }
 
   @Test("nearestBucket prefers portrait for portrait requests")
   func nearestBucketPortrait() {
     let bucket = PixArtDiTConfiguration.nearestBucket(width: 1080, height: 1920)
-    #expect(bucket.height >= bucket.width,
+    #expect(
+      bucket.height >= bucket.width,
       "Expected portrait (h>=w) for 1080x1920 request, got \(bucket)")
     let ar = Float(bucket.width) / Float(bucket.height)
     let targetAR: Float = 1080.0 / 1920.0

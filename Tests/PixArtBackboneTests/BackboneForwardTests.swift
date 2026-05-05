@@ -48,7 +48,8 @@ struct BackboneForwardTests {
 
   // MARK: - Output Shape Tests
 
-  @Test("Forward pass output shape is [B, H, W, outputLatentChannels] and matches input spatial dims")
+  @Test(
+    "Forward pass output shape is [B, H, W, outputLatentChannels] and matches input spatial dims")
   func outputShapeContract() throws {
     // Use the shared fixture (R2.13) to amortize the 28-block init cost.
     let dit = BackboneFixture.dit
@@ -80,7 +81,9 @@ struct BackboneForwardTests {
     #expect(output.dim(1) == latents.dim(1), "Height must be preserved")
     #expect(output.dim(2) == latents.dim(2), "Width must be preserved")
     #expect(output.dim(3) == 4, "Channel dimension must be 4 (variance channels discarded)")
-    #expect(output.dim(3) == dit.outputLatentChannels, "Output channel count must match outputLatentChannels protocol property")
+    #expect(
+      output.dim(3) == dit.outputLatentChannels,
+      "Output channel count must match outputLatentChannels protocol property")
   }
 
   // MARK: - Attention Mask

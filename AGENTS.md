@@ -2,7 +2,7 @@
 
 This file provides comprehensive documentation for AI agents working with the pixart-swift-mlx codebase.
 
-**Version**: 0.5.3-dev
+**Version**: 0.6.0
 **Purpose**: Guide AI agents working on pixart-swift-mlx
 **Audience**: Claude Code, Gemini, and other AI development assistants
 

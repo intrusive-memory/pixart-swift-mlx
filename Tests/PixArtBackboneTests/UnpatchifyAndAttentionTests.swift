@@ -51,7 +51,8 @@ struct UnpatchifyAndAttentionTests {
     let input = MLXArray(values).reshaped(B, T, p * p * c)
 
     // Apply the same reshape/transpose/reshape sequence as FinalLayer.unpatchify.
-    let out = input
+    let out =
+      input
       .reshaped(B, gridH, gridW, p, p, c)
       .transposed(0, 1, 3, 2, 4, 5)
       .reshaped(B, gridH * p, gridW * p, c)
