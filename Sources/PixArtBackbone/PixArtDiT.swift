@@ -311,6 +311,42 @@ public final class PixArtDiT: Module, Backbone, @unchecked Sendable {
       }
     }
 
+    // Sortie 3: variance-discard cast-site instrumentation. Sample the 8-channel output
+    // BEFORE the slice and the 4-channel output AFTER the slice — this is the
+    // "communication error" boundary where wrong slicing would silently corrupt output.
+    // The slice itself MUST execute regardless of telemetry state (production correctness).
+    let varianceBeforeStat: TuberiaTensorStat? = telemetry.map { _ in TuberiaTensorStat.sample(output) }
+
+    // output: [B, H/8, W/8, 8]
+    // Discard variance channels (last 4), keep noise prediction (first 4)
+    output = output[0..., 0..., 0..., 0..<4]
+
+    if telemetry != nil, let beforeStat = varianceBeforeStat {
+      let afterStat = TuberiaTensorStat.sample(output)
+      pendingEvents.append(
+        .varianceChannelsDiscarded(
+          beforeChannels: 8,
+          afterChannels: 4,
+          beforeStat: beforeStat,
+          afterStat: afterStat))
+      if beforeStat.hasNaN || beforeStat.hasInf {
+        pendingEvents.append(
+          .numericalAnomaly(
+            phase: "pixart_variance_before",
+            kind: beforeStat.hasNaN ? .nan : .inf,
+            stepIndex: nil,
+            stat: beforeStat))
+      }
+      if afterStat.hasNaN || afterStat.hasInf {
+        pendingEvents.append(
+          .numericalAnomaly(
+            phase: "pixart_variance_after",
+            kind: afterStat.hasNaN ? .nan : .inf,
+            stepIndex: nil,
+            stat: afterStat))
+      }
+    }
+
     // Dispatch a SINGLE Task that awaits all captures sequentially, guaranteeing
     // deterministic event ordering at the reporter actor (Sortie 7a sequence invariant).
     if let telemetry, !pendingEvents.isEmpty {
@@ -321,10 +357,6 @@ public final class PixArtDiT: Module, Backbone, @unchecked Sendable {
         }
       }
     }
-
-    // output: [B, H/8, W/8, 8]
-    // Discard variance channels (last 4), keep noise prediction (first 4)
-    output = output[0..., 0..., 0..., 0..<4]
 
     return output  // [B, H/8, W/8, 4]
   }
@@ -352,6 +384,39 @@ public final class PixArtDiT: Module, Backbone, @unchecked Sendable {
     //   No .scales or .biases keys present. Load directly without dequantization.
     //
     // The additive layer bias (.bias, singular) is always loaded as-is regardless of format.
+
+    // Sortie 3: weight-apply telemetry. ONE lock acquisition per apply(weights:). Events
+    // accumulate into pendingEvents and are dispatched in a single Task at the end (mirrors
+    // Sortie 5b's forward-pass coalesced pattern).
+    let telemetry = currentTelemetry()
+    let start = Date()
+    var pendingEvents: [PixArtTelemetryEvent] = []
+
+    // Quantization detection — scan keys for .scales/.biases sidecars (int4) or fp16 .weight
+    // dtype. This runs unconditionally (used to populate the weight-apply-start payload).
+    let weightKeyCount = weights.parameters.count
+    let quantization: PixArtTelemetryEvent.PixArtQuantization = {
+      var hasSidecar = false
+      var hasFP16Weight = false
+      for (key, tensor) in weights.parameters {
+        if key.hasSuffix(".scales") || key.hasSuffix(".biases") {
+          hasSidecar = true
+          break
+        }
+        if key.hasSuffix(".weight") && tensor.dtype == .float16 {
+          hasFP16Weight = true
+        }
+      }
+      if hasSidecar { return .int4 }
+      if hasFP16Weight { return .fp16 }
+      return .unknown
+    }()
+
+    if telemetry != nil {
+      pendingEvents.append(
+        .weightApplyStart(quantization: quantization, weightKeyCount: weightKeyCount))
+    }
+
     var params: [String: MLXArray] = [:]
     var scalesMap: [String: MLXArray] = [:]
     var biasesMap: [String: MLXArray] = [:]
@@ -367,10 +432,17 @@ public final class PixArtDiT: Module, Backbone, @unchecked Sendable {
       }
     }
 
+    // Per-branch counters for the weight-apply-complete payload (Q3.2 default: count .weight
+    // keys consumed via each path, NOT individual MLX kernel invocations).
+    var dequantizedKeys = 0
+    var passThroughKeys = 0
+    var scalesBiasesSkipped = 0
+
     // Second pass: dequantize int4 weight tensors or pass through fp16 weights unchanged
     for (key, tensor) in weights.parameters {
       // Skip quantization sidecar keys (handled via scalesMap/biasesMap above)
       if key.hasSuffix(".scales") || key.hasSuffix(".biases") {
+        scalesBiasesSkipped += 1
         continue
       }
 
@@ -386,9 +458,11 @@ public final class PixArtDiT: Module, Backbone, @unchecked Sendable {
         let floatWeight = dequantized(
           tensor, scales: scales, biases: biases, groupSize: 64, bits: 4)
         params[key] = floatWeight.asType(.float16)
+        dequantizedKeys += 1
       } else {
         // FP16 path (or any non-quantized tensor): load directly
         params[key] = tensor
+        passThroughKeys += 1
       }
     }
 
@@ -396,11 +470,62 @@ public final class PixArtDiT: Module, Backbone, @unchecked Sendable {
     self.update(parameters: mlxParams)
 
     self.weights = weights
+
+    // Micro-conditioning status scan — fires once per apply(weights:). Today both flags are
+    // false (int4 conversion drops these keys); if a future weight conversion adds them
+    // back, this event flips and the host can confirm micro-conditioning is now live.
+    if telemetry != nil {
+      var sizeEmbedderFound = false
+      var arEmbedderFound = false
+      for key in weights.parameters.keys {
+        if key.contains("sizeEmbedder") { sizeEmbedderFound = true }
+        if key.contains("arEmbedder") { arEmbedderFound = true }
+      }
+      pendingEvents.append(
+        .microConditioningStatus(
+          present: sizeEmbedderFound || arEmbedderFound,
+          sizeEmbedderFound: sizeEmbedderFound,
+          arEmbedderFound: arEmbedderFound))
+
+      let durationSeconds = Date().timeIntervalSince(start)
+      let sizeMB = Double(estimatedMemoryBytes) / 1_048_576.0
+      pendingEvents.append(
+        .weightApplyComplete(
+          quantization: quantization,
+          totalKeys: weightKeyCount,
+          dequantizedKeys: dequantizedKeys,
+          passThroughKeys: passThroughKeys,
+          scalesBiasesSkipped: scalesBiasesSkipped,
+          sizeMB: sizeMB,
+          durationSeconds: durationSeconds))
+    }
+
     self.isLoaded = true
+
+    // Dispatch all accumulated events in a single Task (mirrors Sortie 5b's pattern).
+    if let telemetry, !pendingEvents.isEmpty {
+      let events = pendingEvents
+      Task {
+        for event in events {
+          await telemetry.capture(event)
+        }
+      }
+    }
   }
 
   public func unload() {
+    // Sortie 3: capture restoredKeyCount BEFORE clearing weights, then dispatch a single
+    // weight-unload event. Single event = no pendingEvents array needed.
+    let telemetry = currentTelemetry()
+    let restoredKeyCount = weights?.parameters.count ?? 0
+
     self.weights = nil
     self.isLoaded = false
+
+    if let telemetry {
+      Task {
+        await telemetry.capture(.weightUnload(restoredKeyCount: restoredKeyCount))
+      }
+    }
   }
 }
