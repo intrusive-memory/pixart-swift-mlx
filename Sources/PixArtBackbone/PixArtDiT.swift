@@ -144,42 +144,41 @@ public final class PixArtDiT: Module, Backbone, @unchecked Sendable {
     let gridH = spatialH / configuration.patchSize
     let gridW = spatialW / configuration.patchSize
 
+    // Sortie 5b: collect all telemetry events into a single array during synchronous forward
+    // work, then dispatch exactly ONE Task at the end that awaits captures sequentially.
+    // This guarantees deterministic event ordering at the reporter actor (Sortie 7a invariant).
+    var pendingEvents: [PixArtTelemetryEvent] = []
+
     // Telemetry: forward-start event — fired after input extraction, before patchEmbed.
     // BackboneInput does not currently expose `stepIndex` (Q5.1 default: pass nil).
-    if let telemetry {
+    if telemetry != nil {
       let stepIndex: Int? = nil
       let inputLatentStat = TuberiaTensorStat.sample(latents)
       let conditioningStat = TuberiaTensorStat.sample(conditioning)
-      Task {
-        await telemetry.capture(
-          .ditForwardStart(
-            stepIndex: stepIndex,
-            batch: latents.shape[0],
-            latentShape: latents.shape,
-            conditioningShape: conditioning.shape,
-            timestepShape: timestep.shape,
-            inputLatentStat: inputLatentStat,
-            conditioningStat: conditioningStat))
-      }
+      pendingEvents.append(
+        .ditForwardStart(
+          stepIndex: stepIndex,
+          batch: latents.shape[0],
+          latentShape: latents.shape,
+          conditioningShape: conditioning.shape,
+          timestepShape: timestep.shape,
+          inputLatentStat: inputLatentStat,
+          conditioningStat: conditioningStat))
       if inputLatentStat.hasNaN || inputLatentStat.hasInf {
-        Task {
-          await telemetry.capture(
-            .numericalAnomaly(
-              phase: "pixart_dit_forward_start_input_latent",
-              kind: inputLatentStat.hasNaN ? .nan : .inf,
-              stepIndex: stepIndex,
-              stat: inputLatentStat))
-        }
+        pendingEvents.append(
+          .numericalAnomaly(
+            phase: "pixart_dit_forward_start_input_latent",
+            kind: inputLatentStat.hasNaN ? .nan : .inf,
+            stepIndex: stepIndex,
+            stat: inputLatentStat))
       }
       if conditioningStat.hasNaN || conditioningStat.hasInf {
-        Task {
-          await telemetry.capture(
-            .numericalAnomaly(
-              phase: "pixart_dit_forward_start_conditioning",
-              kind: conditioningStat.hasNaN ? .nan : .inf,
-              stepIndex: stepIndex,
-              stat: conditioningStat))
-        }
+        pendingEvents.append(
+          .numericalAnomaly(
+            phase: "pixart_dit_forward_start_conditioning",
+            kind: conditioningStat.hasNaN ? .nan : .inf,
+            stepIndex: stepIndex,
+            stat: conditioningStat))
       }
     }
 
@@ -187,21 +186,17 @@ public final class PixArtDiT: Module, Backbone, @unchecked Sendable {
     let patched = patchEmbed(latents)
 
     // Telemetry: patch-embed-complete event (gridH/gridW are the post-patch spatial grid).
-    if let telemetry {
+    if telemetry != nil {
       let patchedStat = TuberiaTensorStat.sample(patched)
-      Task {
-        await telemetry.capture(
-          .patchEmbedComplete(stat: patchedStat, gridH: gridH, gridW: gridW))
-      }
+      pendingEvents.append(
+        .patchEmbedComplete(stat: patchedStat, gridH: gridH, gridW: gridW))
       if patchedStat.hasNaN || patchedStat.hasInf {
-        Task {
-          await telemetry.capture(
-            .numericalAnomaly(
-              phase: "pixart_patch_embed",
-              kind: patchedStat.hasNaN ? .nan : .inf,
-              stepIndex: nil,
-              stat: patchedStat))
-        }
+        pendingEvents.append(
+          .numericalAnomaly(
+            phase: "pixart_patch_embed",
+            kind: patchedStat.hasNaN ? .nan : .inf,
+            stepIndex: nil,
+            stat: patchedStat))
       }
     }
 
@@ -222,20 +217,16 @@ public final class PixArtDiT: Module, Backbone, @unchecked Sendable {
     let y = captionProjection(conditioning)
 
     // Telemetry: caption-projection-complete event.
-    if let telemetry {
+    if telemetry != nil {
       let yStat = TuberiaTensorStat.sample(y)
-      Task {
-        await telemetry.capture(.captionProjectionComplete(stat: yStat))
-      }
+      pendingEvents.append(.captionProjectionComplete(stat: yStat))
       if yStat.hasNaN || yStat.hasInf {
-        Task {
-          await telemetry.capture(
-            .numericalAnomaly(
-              phase: "pixart_caption_proj",
-              kind: yStat.hasNaN ? .nan : .inf,
-              stepIndex: nil,
-              stat: yStat))
-        }
+        pendingEvents.append(
+          .numericalAnomaly(
+            phase: "pixart_caption_proj",
+            kind: yStat.hasNaN ? .nan : .inf,
+            stepIndex: nil,
+            stat: yStat))
       }
     }
 
@@ -258,49 +249,39 @@ public final class PixArtDiT: Module, Backbone, @unchecked Sendable {
 
     // Telemetry: timestep-embedding-complete event + the silu-workaround marker.
     // tEmb = sinusoidal, t = projected (post-timestepEmbedder MLP), tBlock = post-silu+linear.
-    if let telemetry {
+    if telemetry != nil {
       let sinusoidalStat = TuberiaTensorStat.sample(tEmb)
       let projectedStat = TuberiaTensorStat.sample(t)
       let tBlockStat = TuberiaTensorStat.sample(tBlock)
-      Task {
-        await telemetry.capture(
-          .timestepEmbeddingComplete(
-            sinusoidalStat: sinusoidalStat,
-            projectedStat: projectedStat,
-            tBlockStat: tBlockStat))
-      }
-      Task {
-        await telemetry.capture(.siluWorkaroundExecuted)
-      }
+      pendingEvents.append(
+        .timestepEmbeddingComplete(
+          sinusoidalStat: sinusoidalStat,
+          projectedStat: projectedStat,
+          tBlockStat: tBlockStat))
+      pendingEvents.append(.siluWorkaroundExecuted)
       if sinusoidalStat.hasNaN || sinusoidalStat.hasInf {
-        Task {
-          await telemetry.capture(
-            .numericalAnomaly(
-              phase: "pixart_timestep_emb_sinusoidal",
-              kind: sinusoidalStat.hasNaN ? .nan : .inf,
-              stepIndex: nil,
-              stat: sinusoidalStat))
-        }
+        pendingEvents.append(
+          .numericalAnomaly(
+            phase: "pixart_timestep_emb_sinusoidal",
+            kind: sinusoidalStat.hasNaN ? .nan : .inf,
+            stepIndex: nil,
+            stat: sinusoidalStat))
       }
       if projectedStat.hasNaN || projectedStat.hasInf {
-        Task {
-          await telemetry.capture(
-            .numericalAnomaly(
-              phase: "pixart_timestep_emb_projected",
-              kind: projectedStat.hasNaN ? .nan : .inf,
-              stepIndex: nil,
-              stat: projectedStat))
-        }
+        pendingEvents.append(
+          .numericalAnomaly(
+            phase: "pixart_timestep_emb_projected",
+            kind: projectedStat.hasNaN ? .nan : .inf,
+            stepIndex: nil,
+            stat: projectedStat))
       }
       if tBlockStat.hasNaN || tBlockStat.hasInf {
-        Task {
-          await telemetry.capture(
-            .numericalAnomaly(
-              phase: "pixart_timestep_emb_t_block",
-              kind: tBlockStat.hasNaN ? .nan : .inf,
-              stepIndex: nil,
-              stat: tBlockStat))
-        }
+        pendingEvents.append(
+          .numericalAnomaly(
+            phase: "pixart_timestep_emb_t_block",
+            kind: tBlockStat.hasNaN ? .nan : .inf,
+            stepIndex: nil,
+            stat: tBlockStat))
       }
     }
 
@@ -317,19 +298,26 @@ public final class PixArtDiT: Module, Backbone, @unchecked Sendable {
     var output = finalLayer(x, t: tRaw, gridH: gridH, gridW: gridW)
 
     // Telemetry: final-layer-complete event — 8-channel output BEFORE Sortie 3's variance discard.
-    if let telemetry {
+    if telemetry != nil {
       let finalStat = TuberiaTensorStat.sample(output)
-      Task {
-        await telemetry.capture(.finalLayerComplete(stat: finalStat))
-      }
+      pendingEvents.append(.finalLayerComplete(stat: finalStat))
       if finalStat.hasNaN || finalStat.hasInf {
-        Task {
-          await telemetry.capture(
-            .numericalAnomaly(
-              phase: "pixart_final_layer",
-              kind: finalStat.hasNaN ? .nan : .inf,
-              stepIndex: nil,
-              stat: finalStat))
+        pendingEvents.append(
+          .numericalAnomaly(
+            phase: "pixart_final_layer",
+            kind: finalStat.hasNaN ? .nan : .inf,
+            stepIndex: nil,
+            stat: finalStat))
+      }
+    }
+
+    // Dispatch a SINGLE Task that awaits all captures sequentially, guaranteeing
+    // deterministic event ordering at the reporter actor (Sortie 7a sequence invariant).
+    if let telemetry, !pendingEvents.isEmpty {
+      let events = pendingEvents  // explicit value capture; no reference-capture ambiguity
+      Task {
+        for event in events {
+          await telemetry.capture(event)
         }
       }
     }
