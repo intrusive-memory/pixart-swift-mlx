@@ -1,6 +1,7 @@
 @preconcurrency import MLX
 import MLXNN
 import Tuberia
+import os.lock
 
 /// PixArt-Sigma DiT transformer backbone.
 ///
@@ -29,6 +30,20 @@ public final class PixArtDiT: Module, Backbone, @unchecked Sendable {
   private let configuration: Configuration
   private var weights: Tuberia.ModuleParameters?
   public private(set) var isLoaded: Bool = false
+
+  // MARK: - Telemetry Seam
+
+  private let _telemetryLock = OSAllocatedUnfairLock<(any PixArtTelemetryReporter)?>(initialState: nil)
+
+  public func setTelemetry(_ reporter: (any PixArtTelemetryReporter)?) {
+    _telemetryLock.withLock { state in
+      state = reporter
+    }
+  }
+
+  fileprivate func currentTelemetry() -> (any PixArtTelemetryReporter)? {
+    _telemetryLock.withLock { $0 }
+  }
 
   // -- Patch Embedding --
   let patchEmbed: Conv2d
