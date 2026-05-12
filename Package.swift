@@ -61,6 +61,15 @@ let package = Package(
       "SwiftAcervo",
       remote: "https://github.com/intrusive-memory/SwiftAcervo.git",
       from: "0.11.1"),
+    // Transitive cap: swift-tokenizers 0.6.0 switched the Rust binary target
+    // from an XCFramework to an artifactbundle, which breaks the
+    // `#if canImport(TokenizersRust)` path under xcodebuild. SwiftTuberia
+    // currently allows .upToNextMajor(from: "0.5.0") which lets CI resolve to
+    // a broken 0.6.x. Pin to 0.5.x via constraint intersection until upstream
+    // is fixed or SwiftTuberia tightens its own constraint.
+    .package(
+      url: "https://github.com/DePasqualeOrg/swift-tokenizers.git",
+      "0.5.0" ..< "0.6.0"),
   ],
   targets: [
     .target(
