@@ -129,7 +129,6 @@ public final class PixArtDiT: Module, Backbone, @unchecked Sendable {
     // reuse these bindings; no additional telemetry-lock reads below.
     let telemetry = currentTelemetry()
     let forwardStart = Date()
-    _ = forwardStart  // Sortie 6 consumes this for the per-step duration field.
 
     let latents = input.latents  // [B, H/8, W/8, 4]
     let conditioning = input.conditioning  // [B, seqLen, 4096]
@@ -344,6 +343,23 @@ public final class PixArtDiT: Module, Backbone, @unchecked Sendable {
             kind: afterStat.hasNaN ? .nan : .inf,
             stepIndex: nil,
             stat: afterStat))
+      }
+    }
+
+    // Sortie 6: step-boundary emission — fired ONCE per scheduler step, OUTSIDE the per-block loop.
+    // Consumes forwardStart captured at function entry. Must be the last event appended before dispatch.
+    if let telemetry {
+      let outputStat = TuberiaTensorStat.sample(output)
+      pendingEvents.append(.ditForwardComplete(
+        stepIndex: nil,
+        outputStat: outputStat,
+        durationSeconds: Date().timeIntervalSince(forwardStart)))
+      if outputStat.hasNaN || outputStat.hasInf {
+        pendingEvents.append(.numericalAnomaly(
+          phase: "pixart_forward_output",
+          kind: outputStat.hasNaN ? .nan : .inf,
+          stepIndex: nil,
+          stat: outputStat))
       }
     }
 
