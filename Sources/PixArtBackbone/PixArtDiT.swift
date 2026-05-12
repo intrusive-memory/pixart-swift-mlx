@@ -1,4 +1,5 @@
 @preconcurrency import MLX
+import Foundation
 import MLXNN
 import Tuberia
 import os.lock
@@ -124,6 +125,12 @@ public final class PixArtDiT: Module, Backbone, @unchecked Sendable {
   // MARK: - Forward Pass
 
   public func forward(_ input: BackboneInput) throws -> MLXArray {
+    // Hot-path telemetry: ONE lock acquisition per forward. Sorties 3 and 6
+    // reuse these bindings; no additional telemetry-lock reads below.
+    let telemetry = currentTelemetry()
+    let forwardStart = Date()
+    _ = forwardStart  // Sortie 6 consumes this for the per-step duration field.
+
     let latents = input.latents  // [B, H/8, W/8, 4]
     let conditioning = input.conditioning  // [B, seqLen, 4096]
     let conditioningMask = input.conditioningMask  // [B, seqLen]
@@ -137,8 +144,66 @@ public final class PixArtDiT: Module, Backbone, @unchecked Sendable {
     let gridH = spatialH / configuration.patchSize
     let gridW = spatialW / configuration.patchSize
 
+    // Telemetry: forward-start event — fired after input extraction, before patchEmbed.
+    // BackboneInput does not currently expose `stepIndex` (Q5.1 default: pass nil).
+    if let telemetry {
+      let stepIndex: Int? = nil
+      let inputLatentStat = TuberiaTensorStat.sample(latents)
+      let conditioningStat = TuberiaTensorStat.sample(conditioning)
+      Task {
+        await telemetry.capture(
+          .ditForwardStart(
+            stepIndex: stepIndex,
+            batch: latents.shape[0],
+            latentShape: latents.shape,
+            conditioningShape: conditioning.shape,
+            timestepShape: timestep.shape,
+            inputLatentStat: inputLatentStat,
+            conditioningStat: conditioningStat))
+      }
+      if inputLatentStat.hasNaN || inputLatentStat.hasInf {
+        Task {
+          await telemetry.capture(
+            .numericalAnomaly(
+              phase: "pixart_dit_forward_start_input_latent",
+              kind: inputLatentStat.hasNaN ? .nan : .inf,
+              stepIndex: stepIndex,
+              stat: inputLatentStat))
+        }
+      }
+      if conditioningStat.hasNaN || conditioningStat.hasInf {
+        Task {
+          await telemetry.capture(
+            .numericalAnomaly(
+              phase: "pixart_dit_forward_start_conditioning",
+              kind: conditioningStat.hasNaN ? .nan : .inf,
+              stepIndex: stepIndex,
+              stat: conditioningStat))
+        }
+      }
+    }
+
     // 1. Patch embedding: [B, H/8, W/8, 4] -> Conv2d -> [B, gridH, gridW, 1152]
     let patched = patchEmbed(latents)
+
+    // Telemetry: patch-embed-complete event (gridH/gridW are the post-patch spatial grid).
+    if let telemetry {
+      let patchedStat = TuberiaTensorStat.sample(patched)
+      Task {
+        await telemetry.capture(
+          .patchEmbedComplete(stat: patchedStat, gridH: gridH, gridW: gridW))
+      }
+      if patchedStat.hasNaN || patchedStat.hasInf {
+        Task {
+          await telemetry.capture(
+            .numericalAnomaly(
+              phase: "pixart_patch_embed",
+              kind: patchedStat.hasNaN ? .nan : .inf,
+              stepIndex: nil,
+              stat: patchedStat))
+        }
+      }
+    }
 
     // Flatten to token sequence: [B, gridH * gridW, 1152]
     var x = patched.reshaped(B, gridH * gridW, configuration.hiddenSize)
@@ -155,6 +220,24 @@ public final class PixArtDiT: Module, Backbone, @unchecked Sendable {
 
     // 2. Caption projection: [B, seqLen, 4096] -> [B, seqLen, 1152]
     let y = captionProjection(conditioning)
+
+    // Telemetry: caption-projection-complete event.
+    if let telemetry {
+      let yStat = TuberiaTensorStat.sample(y)
+      Task {
+        await telemetry.capture(.captionProjectionComplete(stat: yStat))
+      }
+      if yStat.hasNaN || yStat.hasInf {
+        Task {
+          await telemetry.capture(
+            .numericalAnomaly(
+              phase: "pixart_caption_proj",
+              kind: yStat.hasNaN ? .nan : .inf,
+              stepIndex: nil,
+              stat: yStat))
+        }
+      }
+    }
 
     // 3. Timestep conditioning pipeline
     // Stage 1: Sinusoidal embedding [B] -> [B, 256]
@@ -173,6 +256,54 @@ public final class PixArtDiT: Module, Backbone, @unchecked Sendable {
     // Replace with direct math: silu(x) = x * sigmoid(x)
     let tBlock = tBlockLinear(t * MLX.sigmoid(t))
 
+    // Telemetry: timestep-embedding-complete event + the silu-workaround marker.
+    // tEmb = sinusoidal, t = projected (post-timestepEmbedder MLP), tBlock = post-silu+linear.
+    if let telemetry {
+      let sinusoidalStat = TuberiaTensorStat.sample(tEmb)
+      let projectedStat = TuberiaTensorStat.sample(t)
+      let tBlockStat = TuberiaTensorStat.sample(tBlock)
+      Task {
+        await telemetry.capture(
+          .timestepEmbeddingComplete(
+            sinusoidalStat: sinusoidalStat,
+            projectedStat: projectedStat,
+            tBlockStat: tBlockStat))
+      }
+      Task {
+        await telemetry.capture(.siluWorkaroundExecuted)
+      }
+      if sinusoidalStat.hasNaN || sinusoidalStat.hasInf {
+        Task {
+          await telemetry.capture(
+            .numericalAnomaly(
+              phase: "pixart_timestep_emb_sinusoidal",
+              kind: sinusoidalStat.hasNaN ? .nan : .inf,
+              stepIndex: nil,
+              stat: sinusoidalStat))
+        }
+      }
+      if projectedStat.hasNaN || projectedStat.hasInf {
+        Task {
+          await telemetry.capture(
+            .numericalAnomaly(
+              phase: "pixart_timestep_emb_projected",
+              kind: projectedStat.hasNaN ? .nan : .inf,
+              stepIndex: nil,
+              stat: projectedStat))
+        }
+      }
+      if tBlockStat.hasNaN || tBlockStat.hasInf {
+        Task {
+          await telemetry.capture(
+            .numericalAnomaly(
+              phase: "pixart_timestep_emb_t_block",
+              kind: tBlockStat.hasNaN ? .nan : .inf,
+              stepIndex: nil,
+              stat: tBlockStat))
+        }
+      }
+    }
+
     // Save raw timestep embedding for final layer (before t_block)
     let tRaw = t  // [B, 1152]
 
@@ -184,6 +315,24 @@ public final class PixArtDiT: Module, Backbone, @unchecked Sendable {
     // 5. Final layer: AdaLN(2-param) + linear + unpatchify
     // Uses raw timestep embedding (before t_block)
     var output = finalLayer(x, t: tRaw, gridH: gridH, gridW: gridW)
+
+    // Telemetry: final-layer-complete event — 8-channel output BEFORE Sortie 3's variance discard.
+    if let telemetry {
+      let finalStat = TuberiaTensorStat.sample(output)
+      Task {
+        await telemetry.capture(.finalLayerComplete(stat: finalStat))
+      }
+      if finalStat.hasNaN || finalStat.hasInf {
+        Task {
+          await telemetry.capture(
+            .numericalAnomaly(
+              phase: "pixart_final_layer",
+              kind: finalStat.hasNaN ? .nan : .inf,
+              stepIndex: nil,
+              stat: finalStat))
+        }
+      }
+    }
 
     // output: [B, H/8, W/8, 8]
     // Discard variance channels (last 4), keep noise prediction (first 4)
