@@ -169,11 +169,9 @@ public struct PixArtFP16Recipe: PipelineRecipe, Sendable {
         + "!= backboneConfig.captionChannels (\(config.captionChannels))"
       await telemetry?.capture(
         .recipeValidationFailed(
-          name: "PixArtFP16Recipe",
-          check: "encoder_caption_channels",
-          reason: reason
-        )
-      )
+          name: "PixArtFP16Recipe", check: "encoder_caption_channels", reason: reason))
+      await telemetry?.capture(
+        .errorThrown(phase: .recipeValidation, errorDescription: reason))
       throw PixArtRecipeError.shapeMismatch(reason)
     }
     guard encoderConfig.maxSequenceLength == config.maxTextLength else {
@@ -182,11 +180,9 @@ public struct PixArtFP16Recipe: PipelineRecipe, Sendable {
         + "!= backboneConfig.maxTextLength (\(config.maxTextLength))"
       await telemetry?.capture(
         .recipeValidationFailed(
-          name: "PixArtFP16Recipe",
-          check: "encoder_text_length",
-          reason: reason
-        )
-      )
+          name: "PixArtFP16Recipe", check: "encoder_text_length", reason: reason))
+      await telemetry?.capture(
+        .errorThrown(phase: .recipeValidation, errorDescription: reason))
       throw PixArtRecipeError.shapeMismatch(reason)
     }
     guard decoderConfig.latentChannels == 4 else {
@@ -195,11 +191,9 @@ public struct PixArtFP16Recipe: PipelineRecipe, Sendable {
         + "!= backbone outputLatentChannels (4)"
       await telemetry?.capture(
         .recipeValidationFailed(
-          name: "PixArtFP16Recipe",
-          check: "decoder_latent_channels",
-          reason: reason
-        )
-      )
+          name: "PixArtFP16Recipe", check: "decoder_latent_channels", reason: reason))
+      await telemetry?.capture(
+        .errorThrown(phase: .recipeValidation, errorDescription: reason))
       throw PixArtRecipeError.shapeMismatch(reason)
     }
     await telemetry?.capture(.recipeValidated(name: "PixArtFP16Recipe", checksPassed: 3))

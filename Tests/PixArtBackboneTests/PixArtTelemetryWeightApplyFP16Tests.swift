@@ -5,101 +5,75 @@ import Tuberia
 
 @testable import PixArtBackbone
 
-// MARK: - FP16 Weight-Apply Telemetry Tests
-//
-// Verifies that `PixArtDiT.apply(weights:)` emits the correct telemetry events
-// when given a synthetic FP16 weight dictionary (no INT4 sidecars).
-//
-// An FP16 weight dictionary contains:
-//   - <key>.weight  — float16, shape [outDim, inDim]
-//   (No .scales or .biases sidecar keys present.)
-//
-// Expected event:
-//   - weightApplyComplete(quantization: .fp16, dequantizedKeys: 0,
-//                         passThroughKeys: > 0, scalesBiasesSkipped: 0)
-//
-// After `apply(weights:)` returns the events are dispatched via a fire-and-forget
-// Task.  Tests sleep 100 ms (Strategy A) before snapshotting the reporter log.
-
+/// Verifies `PixArtDiT.apply(weights:)` emits a single boundary event when given a
+/// synthetic FP16 weight dictionary (no INT4 sidecars).
+///
+/// In the slim surface there is no quantization counter event — `weightLoadComplete`
+/// just carries component + paramCount + duration. Quantization variants of the
+/// same fixture are expected to produce the same boundary event shape.
 @Suite("PixArtTelemetryWeightApplyFP16", .serialized)
 struct PixArtTelemetryWeightApplyFP16Tests {
 
-    // MARK: - Synthetic fixture helpers
+  private static func makeFP16Params(key: String = "foo") -> Tuberia.ModuleParameters {
+    let weight = MLXArray([1.0, 2.0, 3.0, 4.0] as [Float]).asType(.float16)
+    return Tuberia.ModuleParameters(parameters: [
+      "\(key).weight": weight
+    ])
+  }
 
-    /// Build a minimal FP16 weight dict: one <key>.weight at float16, no sidecars.
-    private static func makeFP16Params(key: String = "foo") -> Tuberia.ModuleParameters {
-        let weight = MLXArray([1.0, 2.0, 3.0, 4.0] as [Float]).asType(.float16)
-        return Tuberia.ModuleParameters(parameters: [
-            "\(key).weight": weight,
-        ])
+  @Test("FP16 apply emits exactly one weightLoadComplete(component: .dit) with paramCount==1")
+  func fp16ApplyEmitsSingleWeightLoadComplete() async throws {
+    let dit = try PixArtDiT(configuration: PixArtDiTConfiguration())
+    let reporter = MockReporter()
+    dit.setTelemetry(reporter)
+
+    try dit.apply(weights: Self.makeFP16Params())
+
+    try await Task.sleep(nanoseconds: 100_000_000)
+    let events = await reporter.snapshot()
+
+    let completeEvents = events.compactMap {
+      event -> (PixArtTelemetryEvent.WeightComponent, Int)? in
+      if case .weightLoadComplete(let component, let paramCount, _) = event {
+        return (component, paramCount)
+      }
+      return nil
     }
-
-    // MARK: - weightApplyStart quantization classification
-
-    @Test("FP16 apply emits weightApplyStart with quantization=.fp16")
-    func fp16ApplyEmitsWeightApplyStartWithFP16Quantization() async throws {
-        let dit = try PixArtDiT(configuration: PixArtDiTConfiguration())
-        let reporter = MockReporter()
-        dit.setTelemetry(reporter)
-
-        let params = Self.makeFP16Params()
-        try dit.apply(weights: params)
-
-        try await Task.sleep(nanoseconds: 100_000_000)
-        let events = await reporter.snapshot()
-
-        let startEvents = events.filter { event -> Bool in
-            if case .weightApplyStart(let q, _) = event {
-                return q == .fp16
-            }
-            return false
-        }
-        #expect(
-            startEvents.count == 1,
-            "Expected exactly one weightApplyStart(.fp16); got \(startEvents.count) in \(events)"
-        )
+    #expect(
+      completeEvents.count == 1,
+      "Expected exactly one weightLoadComplete; got \(completeEvents.count) in \(events)")
+    if let (component, paramCount) = completeEvents.first {
+      #expect(component == .dit)
+      #expect(paramCount == 1)
     }
+  }
 
-    // MARK: - weightApplyComplete
+  @Test("FP16 apply emits no events when reporter is nil (no crash)")
+  func fp16ApplyNoEventsWhenReporterNil() async throws {
+    let dit = try PixArtDiT(configuration: PixArtDiTConfiguration())
+    try dit.apply(weights: Self.makeFP16Params())
+    #expect(dit.isLoaded == true)
+  }
 
-    @Test("FP16 apply emits weightApplyComplete with dequantizedKeys=0, passThroughKeys>0, scalesBiasesSkipped=0")
-    func fp16ApplyEmitsWeightApplyComplete() async throws {
-        let dit = try PixArtDiT(configuration: PixArtDiTConfiguration())
-        let reporter = MockReporter()
-        dit.setTelemetry(reporter)
+  @Test("unload() emits exactly one weightUnloadComplete")
+  func unloadEmitsWeightUnloadComplete() async throws {
+    let dit = try PixArtDiT(configuration: PixArtDiTConfiguration())
+    let reporter = MockReporter()
+    dit.setTelemetry(reporter)
 
-        let params = Self.makeFP16Params()
-        try dit.apply(weights: params)
+    try dit.apply(weights: Self.makeFP16Params())
+    try await Task.sleep(nanoseconds: 100_000_000)
+    await reporter.clear()
 
-        try await Task.sleep(nanoseconds: 100_000_000)
-        let events = await reporter.snapshot()
+    dit.unload()
+    try await Task.sleep(nanoseconds: 100_000_000)
+    let events = await reporter.snapshot()
 
-        let completeEvents = events.filter { event -> Bool in
-            if case .weightApplyComplete(
-                let q, _, let dequantized, let passThrough, let skipped, _, _) = event {
-                return q == .fp16
-                    && dequantized == 0
-                    && passThrough > 0
-                    && skipped == 0
-            }
-            return false
-        }
-        #expect(
-            completeEvents.count == 1,
-            "Expected exactly one weightApplyComplete(.fp16, dequantizedKeys:0, passThroughKeys:>0, scalesBiasesSkipped:0); got \(completeEvents.count) in \(events)"
-        )
-    }
-
-    // MARK: - No telemetry when reporter is nil
-
-    @Test("FP16 apply emits no events when reporter is nil (no crash, no leak)")
-    func fp16ApplyNoEventsWhenReporterNil() async throws {
-        let dit = try PixArtDiT(configuration: PixArtDiTConfiguration())
-        // Do NOT call setTelemetry — reporter stays nil.
-
-        let params = Self.makeFP16Params()
-        // Must not throw and must not crash.
-        try dit.apply(weights: params)
-        #expect(dit.isLoaded == true)
-    }
+    let unloadCount = events.filter {
+      if case .weightUnloadComplete = $0 { return true }
+      return false
+    }.count
+    #expect(unloadCount == 1, "Expected one weightUnloadComplete; got \(unloadCount) in \(events)")
+    #expect(dit.isLoaded == false)
+  }
 }

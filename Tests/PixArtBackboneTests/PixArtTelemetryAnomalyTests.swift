@@ -5,215 +5,92 @@ import Tuberia
 
 @testable import PixArtBackbone
 
-// MARK: - Numerical Anomaly Telemetry Tests
-//
-// Verifies that `PixArtDiT.forward(_:)` emits `.numericalAnomaly` events when a
-// NaN-poisoned input latent is supplied, and that no anomaly events fire when the
-// input is clean.
-//
-// ## Approach A — NaN-poisoned input latent
-//
-// The forward path samples the input latent at the `ditForwardStart` emission site:
-//
-//   let inputLatentStat = TuberiaTensorStat.sample(latents)
-//   if inputLatentStat.hasNaN || inputLatentStat.hasInf {
-//       pendingEvents.append(.numericalAnomaly(
-//           phase: "pixart_dit_forward_start_input_latent",
-//           kind: inputLatentStat.hasNaN ? .nan : .inf,
-//           stepIndex: nil,
-//           stat: inputLatentStat))
-//   }
-//
-// Injecting `Float.nan` into the latent tensor is sufficient to trigger this path
-// without any subclassing or source modification.
-//
-// Phase string reference: `PixArtDiT.swift`, the `ditForwardStart` emission block.
-//
-// IMPORTANT: A fresh `PixArtDiT` instance is used per test (NOT `BackboneFixture.dit`)
-// to avoid event contamination from concurrent `forward(_:)` calls in other test suites.
-//
-// After `forward(_:)` returns, events are dispatched via a fire-and-forget Task.
-// Tests sleep 100 ms (Strategy A) before snapshotting the reporter log.
-
+/// Verifies that `PixArtDiT.forward(_:)` emits `numericalAnomaly(phase: .ditForward)`
+/// when the forward output is numerically bad, and emits nothing when the output is
+/// clean.
+///
+/// In the slim surface there is **no happy-path forward event** — the only signal
+/// PixArt sends from the forward path is a side-channel anomaly. A NaN injected into
+/// the input latent propagates through the model and shows up in the output stat,
+/// where the exit-time check catches it.
+///
+/// A fresh `PixArtDiT` instance per test prevents event contamination from other
+/// suites that exercise the forward path concurrently.
 @Suite("PixArtTelemetryAnomaly", .serialized)
 struct PixArtTelemetryAnomalyTests {
 
-    // MARK: - Fixture helpers
+  private static func makeCleanInput() -> BackboneInput {
+    BackboneInput(
+      latents: MLXArray.zeros([1, 4, 4, 4]),
+      conditioning: MLXArray.zeros([1, 120, 4096]),
+      conditioningMask: MLXArray.ones([1, 120]),
+      timestep: MLXArray([500 as Float])
+    )
+  }
 
-    /// Normal (clean) synthetic input: all zeros, shape [1, 4, 4, 4].
-    private static func makeCleanInput() -> BackboneInput {
-        BackboneInput(
-            latents: MLXArray.zeros([1, 4, 4, 4]),
-            conditioning: MLXArray.zeros([1, 120, 4096]),
-            conditioningMask: MLXArray.ones([1, 120]),
-            timestep: MLXArray([500 as Float])
-        )
+  private static func makeNaNPoisonedInput() -> BackboneInput {
+    var values = [Float](repeating: 0.0, count: 1 * 4 * 4 * 4)
+    values[0] = .nan
+    let poisonedLatents = MLXArray(values).reshaped([1, 4, 4, 4])
+    eval(poisonedLatents)
+
+    return BackboneInput(
+      latents: poisonedLatents,
+      conditioning: MLXArray.zeros([1, 120, 4096]),
+      conditioningMask: MLXArray.ones([1, 120]),
+      timestep: MLXArray([500 as Float])
+    )
+  }
+
+  private static func makeFreshDiT() throws -> PixArtDiT {
+    try PixArtDiT(configuration: PixArtDiTConfiguration())
+  }
+
+  @Test("NaN-poisoned latent emits exactly one numericalAnomaly(phase: .ditForward, kind: .nan)")
+  func nanPoisonedLatentEmitsAnomaly() async throws {
+    let dit = try Self.makeFreshDiT()
+    let reporter = MockReporter()
+    dit.setTelemetry(reporter)
+
+    let output = try dit.forward(Self.makeNaNPoisonedInput())
+    eval(output)
+
+    try await Task.sleep(nanoseconds: 100_000_000)
+    let events = await reporter.snapshot()
+
+    let anomalies = events.compactMap {
+      event -> (
+        PixArtTelemetryEvent.AnomalyPhase, PixArtTelemetryEvent.AnomalyKind, TuberiaTensorStat
+      )? in
+      if case .numericalAnomaly(let phase, let kind, let stat) = event {
+        return (phase, kind, stat)
+      }
+      return nil
     }
-
-    /// NaN-poisoned latent input: a [1, 4, 4, 4] tensor where one entry is Float.nan.
-    ///
-    /// Construction: start with a zeros array and scatter one NaN via concatenation so
-    /// `TuberiaTensorStat.sample(latents)` returns `hasNaN == true`. This causes
-    /// `PixArtDiT.forward(_:)` to emit `.numericalAnomaly(phase: "pixart_dit_forward_start_input_latent", kind: .nan, ...)`.
-    private static func makeNaNPoisonedInput() -> BackboneInput {
-        // Build a flat [64] float32 array with one NaN at index 0.
-        let nanValue: Float = .nan
-        var values = [Float](repeating: 0.0, count: 1 * 4 * 4 * 4)
-        values[0] = nanValue
-        let poisonedLatents = MLXArray(values).reshaped([1, 4, 4, 4])
-        eval(poisonedLatents)
-
-        return BackboneInput(
-            latents: poisonedLatents,
-            conditioning: MLXArray.zeros([1, 120, 4096]),
-            conditioningMask: MLXArray.ones([1, 120]),
-            timestep: MLXArray([500 as Float])
-        )
+    #expect(
+      anomalies.count == 1,
+      "Expected exactly one numericalAnomaly; got \(anomalies.count) in \(events)")
+    if let (phase, kind, stat) = anomalies.first {
+      #expect(phase == .ditForward)
+      #expect(kind == .nan)
+      #expect(stat.hasNaN == true)
     }
+  }
 
-    /// Creates an isolated PixArtDiT. Each test gets its own instance so
-    /// telemetry events from other suites cannot contaminate the reporter log.
-    private static func makeFreshDiT() throws -> PixArtDiT {
-        try PixArtDiT(configuration: PixArtDiTConfiguration())
-    }
+  @Test("Clean input emits zero events from forward (boundary-only surface)")
+  func cleanInputEmitsNoEvents() async throws {
+    let dit = try Self.makeFreshDiT()
+    let reporter = MockReporter()
+    dit.setTelemetry(reporter)
 
-    // MARK: - NaN anomaly: at least one event fires
+    let output = try dit.forward(Self.makeCleanInput())
+    eval(output)
 
-    @Test("NaN-poisoned latent causes at least one .numericalAnomaly event")
-    func nanPoisonedLatentEmitsNumericalAnomaly() async throws {
-        let dit = try Self.makeFreshDiT()
-        let reporter = MockReporter()
-        dit.setTelemetry(reporter)
+    try await Task.sleep(nanoseconds: 100_000_000)
+    let events = await reporter.snapshot()
 
-        let input = Self.makeNaNPoisonedInput()
-        let output = try dit.forward(input)
-        eval(output)
-
-        // Strategy A: 100 ms to allow fire-and-forget Task to deliver events.
-        try await Task.sleep(nanoseconds: 100_000_000)
-        let events = await reporter.snapshot()
-
-        let anomalyEvents = events.filter { event -> Bool in
-            if case .numericalAnomaly = event { return true }
-            return false
-        }
-        #expect(
-            anomalyEvents.count >= 1,
-            "Expected at least one .numericalAnomaly event for NaN-poisoned input; got \(anomalyEvents.count) in \(events.count) total events"
-        )
-    }
-
-    // MARK: - NaN anomaly: kind is .nan
-
-    @Test("NaN-poisoned latent anomaly event has kind == .nan")
-    func nanPoisonedLatentAnomalyKindIsNaN() async throws {
-        let dit = try Self.makeFreshDiT()
-        let reporter = MockReporter()
-        dit.setTelemetry(reporter)
-
-        let input = Self.makeNaNPoisonedInput()
-        let output = try dit.forward(input)
-        eval(output)
-
-        try await Task.sleep(nanoseconds: 100_000_000)
-        let events = await reporter.snapshot()
-
-        let nanAnomalyEvents = events.filter { event -> Bool in
-            if case .numericalAnomaly(_, let kind, _, _) = event {
-                return kind == .nan
-            }
-            return false
-        }
-        #expect(
-            nanAnomalyEvents.count >= 1,
-            "Expected at least one .numericalAnomaly with kind=.nan; got \(nanAnomalyEvents.count)"
-        )
-    }
-
-    // MARK: - NaN anomaly: phase matches the input-latent emission site
-
-    @Test("NaN anomaly event for input latent uses phase 'pixart_dit_forward_start_input_latent'")
-    func nanPoisonedLatentAnomalyPhaseMatchesInputLatent() async throws {
-        let dit = try Self.makeFreshDiT()
-        let reporter = MockReporter()
-        dit.setTelemetry(reporter)
-
-        let input = Self.makeNaNPoisonedInput()
-        let output = try dit.forward(input)
-        eval(output)
-
-        try await Task.sleep(nanoseconds: 100_000_000)
-        let events = await reporter.snapshot()
-
-        // The input-latent sampling in PixArtDiT.swift emits this exact phase string.
-        // See the `ditForwardStart` emission block in PixArtDiT.forward(_:).
-        let expectedPhase = "pixart_dit_forward_start_input_latent"
-        let matchingEvents = events.filter { event -> Bool in
-            if case .numericalAnomaly(let phase, let kind, _, _) = event {
-                return phase == expectedPhase && kind == .nan
-            }
-            return false
-        }
-        #expect(
-            matchingEvents.count >= 1,
-            "Expected at least one .numericalAnomaly(phase: \"\(expectedPhase)\", kind: .nan); got \(matchingEvents.count)"
-        )
-    }
-
-    // MARK: - NaN anomaly: stat.hasNaN is true
-
-    @Test("NaN anomaly event carries a stat with hasNaN == true")
-    func nanPoisonedLatentAnomalyStatHasNaN() async throws {
-        let dit = try Self.makeFreshDiT()
-        let reporter = MockReporter()
-        dit.setTelemetry(reporter)
-
-        let input = Self.makeNaNPoisonedInput()
-        let output = try dit.forward(input)
-        eval(output)
-
-        try await Task.sleep(nanoseconds: 100_000_000)
-        let events = await reporter.snapshot()
-
-        var foundStatWithNaN = false
-        for event in events {
-            if case .numericalAnomaly(_, let kind, _, let stat) = event,
-               kind == .nan,
-               stat.hasNaN == true
-            {
-                foundStatWithNaN = true
-                break
-            }
-        }
-        #expect(
-            foundStatWithNaN,
-            "Expected a .numericalAnomaly event with kind=.nan and stat.hasNaN==true"
-        )
-    }
-
-    // MARK: - Positive case: clean input emits zero anomaly events
-
-    @Test("Clean input latent emits zero .numericalAnomaly events")
-    func cleanInputEmitsNoNumericalAnomalyEvents() async throws {
-        let dit = try Self.makeFreshDiT()
-        let reporter = MockReporter()
-        dit.setTelemetry(reporter)
-
-        let input = Self.makeCleanInput()
-        let output = try dit.forward(input)
-        eval(output)
-
-        // Strategy A: 100 ms to allow fire-and-forget Task to deliver events.
-        try await Task.sleep(nanoseconds: 100_000_000)
-        let events = await reporter.snapshot()
-
-        let anomalyEvents = events.filter { event -> Bool in
-            if case .numericalAnomaly = event { return true }
-            return false
-        }
-        #expect(
-            anomalyEvents.count == 0,
-            "Expected zero .numericalAnomaly events for a clean input; got \(anomalyEvents.count) in \(events.count) total events"
-        )
-    }
+    #expect(
+      events.isEmpty,
+      "Expected forward(_:) with clean input to emit zero events; got \(events.count): \(events)")
+  }
 }

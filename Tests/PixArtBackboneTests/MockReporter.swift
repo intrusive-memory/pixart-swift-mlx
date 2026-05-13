@@ -1,4 +1,5 @@
 import Foundation
+
 @testable import PixArtBackbone
 
 /// Test-only reporter that captures every PixArtTelemetryEvent into an
@@ -20,17 +21,17 @@ import Foundation
 ///     try await Task.sleep(nanoseconds: 100_000_000)
 ///     let events = await reporter.snapshot()
 actor MockReporter: PixArtTelemetryReporter {
-    private(set) var events: [PixArtTelemetryEvent] = []
+  private(set) var events: [PixArtTelemetryEvent] = []
 
-    func capture(_ event: PixArtTelemetryEvent) async {
-        events.append(event)
-    }
+  func capture(_ event: PixArtTelemetryEvent) async {
+    events.append(event)
+  }
 
-    func snapshot() async -> [PixArtTelemetryEvent] {
-        events
-    }
+  func snapshot() async -> [PixArtTelemetryEvent] {
+    events
+  }
 
-    func clear() async {
-        events.removeAll()
-    }
+  func clear() async {
+    events.removeAll()
+  }
 }

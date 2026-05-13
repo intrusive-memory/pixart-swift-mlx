@@ -1,88 +1,49 @@
-@preconcurrency import MLX
 import Foundation
+@preconcurrency import MLX
 import Tuberia
 
+/// Slim boundary-only telemetry surface for the PixArt DiT backbone.
+///
+/// Follows the cross-library chokepoint convention documented in
+/// `flux-2-swift-mlx/AGENTS.md §11`: instrument boundaries, not internals.
+/// Per-step / per-block / per-attention-head detail is **deferred** — a
+/// `numericalAnomaly` or `errorThrown` here points the agent at the region;
+/// finer instrumentation is added in a follow-up iteration only after a real
+/// failure demands it.
 public enum PixArtTelemetryEvent: Sendable {
 
-    // --- Recipe lifecycle ---
-    case recipeSelected(name: String, version: String, expectedSteps: Int, expectedGuidanceScale: Double, allComponentIDs: [String])
-    case recipeValidated(name: String, checksPassed: Int)
-    case recipeValidationFailed(name: String, check: String, reason: String)
+  // --- Resource lifecycle ---
+  case weightLoadComplete(component: WeightComponent, paramCount: Int, durationSeconds: Double)
+  case weightUnloadComplete
 
-    // --- DiT init ---
-    case ditInitialized(
-        hiddenSize: Int,
-        depth: Int,
-        numHeads: Int,
-        patchSize: Int,
-        maxTextLength: Int,
-        captionChannels: Int,
-        peInterpolation: Float,
-        baseSize: Int
-    )
+  // --- Recipe configuration ---
+  case recipeValidated(name: String, checksPassed: Int)
+  case recipeValidationFailed(name: String, check: String, reason: String)
 
-    // --- Weight load (boundary memory event on complete) ---
-    case weightApplyStart(quantization: PixArtQuantization, weightKeyCount: Int)
-    case weightApplyComplete(
-        quantization: PixArtQuantization,
-        totalKeys: Int,
-        dequantizedKeys: Int,      // int4 -> fp16 dequantization count
-        passThroughKeys: Int,      // already-fp16 keys loaded directly
-        scalesBiasesSkipped: Int,  // .scales and .biases sidecar keys consumed
-        sizeMB: Double,
-        durationSeconds: Double
-    )
-    case weightUnload(restoredKeyCount: Int)
-    case microConditioningStatus(present: Bool, sizeEmbedderFound: Bool, arEmbedderFound: Bool)
+  // --- Side channels ---
+  case numericalAnomaly(phase: AnomalyPhase, kind: AnomalyKind, stat: TuberiaTensorStat)
+  case errorThrown(phase: ErrorPhase, errorDescription: String)
 
-    // --- Forward pass (per scheduler step) ---
-    case ditForwardStart(
-        stepIndex: Int?,  // populated when caller passes it through; nil if standalone test
-        batch: Int,
-        latentShape: [Int],
-        conditioningShape: [Int],
-        timestepShape: [Int],
-        inputLatentStat: TuberiaTensorStat,
-        conditioningStat: TuberiaTensorStat
-    )
-    case patchEmbedComplete(stat: TuberiaTensorStat, gridH: Int, gridW: Int)
-    case captionProjectionComplete(stat: TuberiaTensorStat)
-    case timestepEmbeddingComplete(sinusoidalStat: TuberiaTensorStat, projectedStat: TuberiaTensorStat, tBlockStat: TuberiaTensorStat)
-    case siluWorkaroundExecuted  // marker that the manual sigmoid path ran (it always does today; absence on a future event would mean MLX.silu got swapped back in)
-    case finalLayerComplete(stat: TuberiaTensorStat)  // 8-channel output before variance discard
-    case varianceChannelsDiscarded(beforeChannels: Int, afterChannels: Int, beforeStat: TuberiaTensorStat, afterStat: TuberiaTensorStat)
-    case ditForwardComplete(
-        stepIndex: Int?,
-        outputStat: TuberiaTensorStat,  // [B, H/8, W/8, 4] noise prediction
-        durationSeconds: Double
-    )
+  public enum WeightComponent: String, Sendable, Codable {
+    case dit
+  }
 
-    // --- Numerical anomaly side-channel ---
-    case numericalAnomaly(phase: String, kind: AnomalyKind, stepIndex: Int?, stat: TuberiaTensorStat)
+  public enum AnomalyPhase: String, Sendable {
+    case weightLoad
+    case ditForward
+  }
 
-    // --- Error side-channel ---
-    case errorThrown(phase: ErrorPhase, errorDescription: String)
+  public enum AnomalyKind: String, Sendable {
+    case nan
+    case inf
+    case outOfRange
+    case zeroLatent
+  }
 
-    public enum PixArtQuantization: String, Sendable, Codable {
-        case int4         // int4-quantized safetensors (~300 MB)
-        case fp16         // dequantized fp16 safetensors (larger, slightly different math)
-        case unknown      // weights loaded but format heuristic didn't match either
-    }
-
-    public enum AnomalyKind: String, Sendable {
-        case nan
-        case inf
-        case outOfRange
-        case zeroLatent
-        case shapeMismatch
-    }
-
-    public enum ErrorPhase: String, Sendable {
-        case ditInit
-        case weightApply
-        case forwardPass
-        case recipeValidation
-        case shapeMismatch
-        case other
-    }
+  public enum ErrorPhase: String, Sendable {
+    case weightLoad
+    case forward
+    case recipeValidation
+    case other
+  }
 }
