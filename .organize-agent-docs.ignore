@@ -1,0 +1,5 @@
+# Files /organize-agent-docs should leave at the repo root.
+# These are project-meta or referenced from FOUNDATIONAL files.
+ARCHITECTURE.md
+REQUIREMENTS.md
+CONTRIBUTING.md
