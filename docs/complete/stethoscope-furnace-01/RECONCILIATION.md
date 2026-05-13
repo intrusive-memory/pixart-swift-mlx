@@ -80,5 +80,7 @@ Mission briefs are historical artifacts of what was learned during a specific it
 
 - Slim surface commit: `b585120 "updating testing strategery"` (2026-05-13)
 - Mission merge: `503acc6 feat(telemetry): PixArt instrumentation surface (OPERATION STETHOSCOPE FURNACE) (#19)`
+- Release: `v0.7.0` (squash `53bcd2d`)
 - Current public surface: `Sources/PixArtBackbone/Telemetry/`
-- Consumer guide: `Sources/PixArtBackbone/Telemetry/README.md`
+- Consumer guide: [`Sources/PixArtBackbone/Telemetry/README.md`](../../../Sources/PixArtBackbone/Telemetry/README.md)
+- Updated requirements (post-pare-down): [`REQUIREMENTS-instrumentation.md`](REQUIREMENTS-instrumentation.md) — §11 catalogs every scope cut

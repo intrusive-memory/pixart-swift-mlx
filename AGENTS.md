@@ -85,6 +85,7 @@ Without this, `Acervo.sharedModelsDirectory` traps with `fatalError`. See [Swift
 PixArtBackbone ships a slim, boundary-only telemetry surface so hosts can diagnose weight-load, recipe-validation, and numerical-anomaly problems. Six events: `weightLoadComplete`, `weightUnloadComplete`, `recipeValidated`, `recipeValidationFailed`, `numericalAnomaly`, `errorThrown`. Hosts conform `PixArtTelemetryReporter`, install via `PixArtDiT.setTelemetry(_:)`, and pass to `recipe.validate(telemetry:)`.
 
 - [Sources/PixArtBackbone/Telemetry/README.md](Sources/PixArtBackbone/Telemetry/README.md) — Consumer guide: events, install pattern, example adapter, alerting recommendations
+- [docs/complete/stethoscope-furnace-01/REQUIREMENTS-instrumentation.md](docs/complete/stethoscope-furnace-01/REQUIREMENTS-instrumentation.md) — Implementation requirements (shipped form), with §11 cataloging what was cut from the original draft and why
 - [docs/complete/stethoscope-furnace-01/RECONCILIATION.md](docs/complete/stethoscope-furnace-01/RECONCILIATION.md) — What the OPERATION STETHOSCOPE FURNACE brief described vs. what shipped after the `b585120` scope cut
 
 ## Documentation Index
