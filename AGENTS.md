@@ -80,6 +80,13 @@ This package depends on [SwiftAcervo](https://github.com/intrusive-memory/SwiftA
 
 Without this, `Acervo.sharedModelsDirectory` traps with `fatalError`. See [SwiftAcervo's USAGE.md](https://github.com/intrusive-memory/SwiftAcervo/blob/main/USAGE.md) for full details.
 
+## Telemetry
+
+PixArtBackbone ships a slim, boundary-only telemetry surface so hosts can diagnose weight-load, recipe-validation, and numerical-anomaly problems. Six events: `weightLoadComplete`, `weightUnloadComplete`, `recipeValidated`, `recipeValidationFailed`, `numericalAnomaly`, `errorThrown`. Hosts conform `PixArtTelemetryReporter`, install via `PixArtDiT.setTelemetry(_:)`, and pass to `recipe.validate(telemetry:)`.
+
+- [Sources/PixArtBackbone/Telemetry/README.md](Sources/PixArtBackbone/Telemetry/README.md) — Consumer guide: events, install pattern, example adapter, alerting recommendations
+- [docs/complete/stethoscope-furnace-01/RECONCILIATION.md](docs/complete/stethoscope-furnace-01/RECONCILIATION.md) — What the OPERATION STETHOSCOPE FURNACE brief described vs. what shipped after the `b585120` scope cut
+
 ## Documentation Index
 
 - [AGENTS.md](AGENTS.md) — Universal agent documentation (this file)
@@ -88,3 +95,4 @@ Without this, `Acervo.sharedModelsDirectory` traps with `fatalError`. See [Swift
 - [REQUIREMENTS.md](REQUIREMENTS.md) — Full specification
 - [ARCHITECTURE.md](ARCHITECTURE.md) — Detailed architecture notes
 - [README.md](README.md) — User-facing documentation
+- [Sources/PixArtBackbone/Telemetry/README.md](Sources/PixArtBackbone/Telemetry/README.md) — Telemetry consumer guide
