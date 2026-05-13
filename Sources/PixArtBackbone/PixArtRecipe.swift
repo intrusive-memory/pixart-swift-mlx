@@ -150,8 +150,9 @@ public struct PixArtRecipe: PipelineRecipe, Sendable {
 
   // MARK: - Validation
 
-  /// Validates shape contract consistency.
+  /// Validates shape contract consistency (satisfies `PipelineRecipe` protocol).
   ///
+  /// Delegates to ``validate(telemetry:)`` with `telemetry: nil`.
   /// The pipeline assembly validates:
   /// - encoderConfig.embeddingDim == backboneConfig.captionChannels (4096)
   /// - encoderConfig.maxSequenceLength == backboneConfig.maxTextLength (120)
@@ -176,6 +177,49 @@ public struct PixArtRecipe: PipelineRecipe, Sendable {
           + "!= backbone outputLatentChannels (4)"
       )
     }
+  }
+
+  /// Validates this recipe's shape and dimension invariants.
+  ///
+  /// The host calls `try await recipe.validate(telemetry: pixartAdapter)` explicitly
+  /// before `DiffusionPipeline.init`. The defaulted `nil` parameter preserves source
+  /// compatibility for callers that do not yet wire telemetry.
+  public func validate(telemetry: (any PixArtTelemetryReporter)? = nil) async throws {
+    let config = backboneConfig
+    guard encoderConfig.embeddingDim == config.captionChannels else {
+      let reason =
+        "encoderConfig.embeddingDim (\(encoderConfig.embeddingDim)) "
+        + "!= backboneConfig.captionChannels (\(config.captionChannels))"
+      await telemetry?.capture(
+        .recipeValidationFailed(
+          name: "PixArtRecipe", check: "encoder_caption_channels", reason: reason))
+      await telemetry?.capture(
+        .errorThrown(phase: .recipeValidation, errorDescription: reason))
+      throw PixArtRecipeError.shapeMismatch(reason)
+    }
+    guard encoderConfig.maxSequenceLength == config.maxTextLength else {
+      let reason =
+        "encoderConfig.maxSequenceLength (\(encoderConfig.maxSequenceLength)) "
+        + "!= backboneConfig.maxTextLength (\(config.maxTextLength))"
+      await telemetry?.capture(
+        .recipeValidationFailed(
+          name: "PixArtRecipe", check: "encoder_text_length", reason: reason))
+      await telemetry?.capture(
+        .errorThrown(phase: .recipeValidation, errorDescription: reason))
+      throw PixArtRecipeError.shapeMismatch(reason)
+    }
+    guard decoderConfig.latentChannels == 4 else {
+      let reason =
+        "decoderConfig.latentChannels (\(decoderConfig.latentChannels)) "
+        + "!= backbone outputLatentChannels (4)"
+      await telemetry?.capture(
+        .recipeValidationFailed(
+          name: "PixArtRecipe", check: "decoder_latent_channels", reason: reason))
+      await telemetry?.capture(
+        .errorThrown(phase: .recipeValidation, errorDescription: reason))
+      throw PixArtRecipeError.shapeMismatch(reason)
+    }
+    await telemetry?.capture(.recipeValidated(name: "PixArtRecipe", checksPassed: 3))
   }
 }
 

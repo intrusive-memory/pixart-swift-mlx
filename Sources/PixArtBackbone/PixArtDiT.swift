@@ -1,6 +1,8 @@
+import Foundation
 @preconcurrency import MLX
 import MLXNN
 import Tuberia
+import os.lock
 
 /// PixArt-Sigma DiT transformer backbone.
 ///
@@ -29,6 +31,21 @@ public final class PixArtDiT: Module, Backbone, @unchecked Sendable {
   private let configuration: Configuration
   private var weights: Tuberia.ModuleParameters?
   public private(set) var isLoaded: Bool = false
+
+  // MARK: - Telemetry Seam
+
+  private let _telemetryLock = OSAllocatedUnfairLock<(any PixArtTelemetryReporter)?>(
+    initialState: nil)
+
+  public func setTelemetry(_ reporter: (any PixArtTelemetryReporter)?) {
+    _telemetryLock.withLock { state in
+      state = reporter
+    }
+  }
+
+  fileprivate func currentTelemetry() -> (any PixArtTelemetryReporter)? {
+    _telemetryLock.withLock { $0 }
+  }
 
   // -- Patch Embedding --
   let patchEmbed: Conv2d
@@ -109,6 +126,13 @@ public final class PixArtDiT: Module, Backbone, @unchecked Sendable {
   // MARK: - Forward Pass
 
   public func forward(_ input: BackboneInput) throws -> MLXArray {
+    // Slim telemetry: zero happy-path events. We sample the output stat ONCE at
+    // exit and emit `numericalAnomaly(phase: .ditForward)` only when the output
+    // is NaN/Inf/out-of-range/zero-latent. The host pipeline owns denoise-loop
+    // boundary events; PixArt is the choke point that signals "the backbone
+    // produced bad output" without flooding per-step.
+    let telemetry = currentTelemetry()
+
     let latents = input.latents  // [B, H/8, W/8, 4]
     let conditioning = input.conditioning  // [B, seqLen, 4096]
     let conditioningMask = input.conditioningMask  // [B, seqLen]
@@ -118,17 +142,12 @@ public final class PixArtDiT: Module, Backbone, @unchecked Sendable {
     let spatialH = latents.dim(1)  // H/8
     let spatialW = latents.dim(2)  // W/8
 
-    // Grid dimensions after patch embedding
     let gridH = spatialH / configuration.patchSize
     let gridW = spatialW / configuration.patchSize
 
-    // 1. Patch embedding: [B, H/8, W/8, 4] -> Conv2d -> [B, gridH, gridW, 1152]
     let patched = patchEmbed(latents)
-
-    // Flatten to token sequence: [B, gridH * gridW, 1152]
     var x = patched.reshaped(B, gridH * gridW, configuration.hiddenSize)
 
-    // Add 2D sinusoidal position embeddings
     let posEmbed = get2DSinusoidalPositionEmbeddings(
       gridH: gridH,
       gridW: gridW,
@@ -138,41 +157,32 @@ public final class PixArtDiT: Module, Backbone, @unchecked Sendable {
     )
     x = x + posEmbed
 
-    // 2. Caption projection: [B, seqLen, 4096] -> [B, seqLen, 1152]
     let y = captionProjection(conditioning)
 
-    // 3. Timestep conditioning pipeline
-    // Stage 1: Sinusoidal embedding [B] -> [B, 256]
     let tEmb = timestepSinusoidalEmbedding(timestep)
-
-    // Stage 2: MLP projection [B, 256] -> [B, 1152]
     let t = timestepEmbedder(tEmb)
-
-    // Stage 3: Micro-conditions (resolution + aspect ratio) are NOT included in the
-    // int4-quantized safetensors — the sizeEmbedder and arEmbedder weights are absent,
-    // meaning micro-conditioning was omitted from the weight conversion.
-    // Skip adding micro-conditions: t remains as timestepEmbedder(tEmb).
-
-    // Stage 4: t_block: SiLU -> Linear(1152, 6*1152) = [B, 6912]
-    // silu uses compile(shapeless:true) which can return 0-D tensors under memory pressure.
-    // Replace with direct math: silu(x) = x * sigmoid(x)
+    // silu uses compile(shapeless:true) which can return 0-D tensors under
+    // memory pressure. Use silu(x) = x * sigmoid(x) directly.
     let tBlock = tBlockLinear(t * MLX.sigmoid(t))
+    let tRaw = t
 
-    // Save raw timestep embedding for final layer (before t_block)
-    let tRaw = t  // [B, 1152]
-
-    // 4. Run through 28 DiT blocks
     for block in blocks {
       x = block(x, y: y, t: tBlock, mask: conditioningMask)
     }
 
-    // 5. Final layer: AdaLN(2-param) + linear + unpatchify
-    // Uses raw timestep embedding (before t_block)
     var output = finalLayer(x, t: tRaw, gridH: gridH, gridW: gridW)
 
-    // output: [B, H/8, W/8, 8]
-    // Discard variance channels (last 4), keep noise prediction (first 4)
+    // output: [B, H/8, W/8, 8] — discard variance channels.
     output = output[0..., 0..., 0..., 0..<4]
+
+    if let telemetry {
+      let outputStat = TuberiaTensorStat.sample(output)
+      if let anomaly = anomalyKind(for: outputStat) {
+        let event = PixArtTelemetryEvent.numericalAnomaly(
+          phase: .ditForward, kind: anomaly, stat: outputStat)
+        Task { await telemetry.capture(event) }
+      }
+    }
 
     return output  // [B, H/8, W/8, 4]
   }
@@ -190,37 +200,31 @@ public final class PixArtDiT: Module, Backbone, @unchecked Sendable {
     // Load weight tensors into the model, handling both int4-quantized and fp16 safetensors.
     //
     // INT4 safetensors (pixart-sigma-xl-dit-int4):
-    //   - <key>.weight  — U32 packed, shape [outDim, inDim/8]
-    //   - <key>.scales  — F16, shape [outDim, numGroups]  (numGroups = inDim/64)
-    //   - <key>.biases  — F16, shape [outDim, numGroups]  (zero-point = min value)
-    //   These are dequantized at load time: floatWeight = packed_values * scales + biases
-    //
-    // FP16 safetensors (pixart-sigma-xl-dit-fp16, produced by dequantize_dit_to_fp16.py):
-    //   - <key>.weight  — F16, shape [outDim, inDim]
-    //   No .scales or .biases keys present. Load directly without dequantization.
-    //
-    // The additive layer bias (.bias, singular) is always loaded as-is regardless of format.
+    //   <key>.weight  — U32 packed, shape [outDim, inDim/8]
+    //   <key>.scales  — F16, shape [outDim, inDim/64]
+    //   <key>.biases  — F16, shape [outDim, inDim/64]   (zero-point = min value)
+    // FP16 safetensors (pixart-sigma-xl-dit-fp16): <key>.weight is F16 [outDim, inDim].
+    let telemetry = currentTelemetry()
+    let start = Date()
+
     var params: [String: MLXArray] = [:]
     var scalesMap: [String: MLXArray] = [:]
     var biasesMap: [String: MLXArray] = [:]
 
-    // First pass: collect scales and biases (quantization zero-points, int4 only)
     for (key, tensor) in weights.parameters {
       if key.hasSuffix(".scales") {
-        let base = String(key.dropLast(".scales".count))
-        scalesMap[base] = tensor
+        scalesMap[String(key.dropLast(".scales".count))] = tensor
       } else if key.hasSuffix(".biases") {
-        let base = String(key.dropLast(".biases".count))
-        biasesMap[base] = tensor
+        biasesMap[String(key.dropLast(".biases".count))] = tensor
       }
     }
 
-    // Second pass: dequantize int4 weight tensors or pass through fp16 weights unchanged
+    var paramCount = 0
     for (key, tensor) in weights.parameters {
-      // Skip quantization sidecar keys (handled via scalesMap/biasesMap above)
       if key.hasSuffix(".scales") || key.hasSuffix(".biases") {
         continue
       }
+      paramCount += 1
 
       let base = String(key.dropLast(".weight".count))
       if key.hasSuffix(".weight"),
@@ -228,27 +232,48 @@ public final class PixArtDiT: Module, Backbone, @unchecked Sendable {
         let biases = biasesMap[base],
         tensor.dtype == .uint32
       {
-        // INT4 path: dequantize packed uint32 to float16
-        // floatWeight[i, j] = packed_values[i, j] * scales[i, g] + biases[i, g]
-        // where g = j / groupSize
         let floatWeight = dequantized(
           tensor, scales: scales, biases: biases, groupSize: 64, bits: 4)
         params[key] = floatWeight.asType(.float16)
       } else {
-        // FP16 path (or any non-quantized tensor): load directly
         params[key] = tensor
       }
     }
 
     let mlxParams = MLXNN.ModuleParameters.unflattened(params)
     self.update(parameters: mlxParams)
-
     self.weights = weights
     self.isLoaded = true
+
+    if let telemetry {
+      let durationSeconds = Date().timeIntervalSince(start)
+      let event = PixArtTelemetryEvent.weightLoadComplete(
+        component: .dit,
+        paramCount: paramCount,
+        durationSeconds: durationSeconds)
+      Task { await telemetry.capture(event) }
+    }
   }
 
   public func unload() {
+    let telemetry = currentTelemetry()
     self.weights = nil
     self.isLoaded = false
+
+    if let telemetry {
+      Task { await telemetry.capture(.weightUnloadComplete) }
+    }
+  }
+
+  // MARK: - Anomaly classification
+
+  /// Returns the anomaly kind for a sampled stat, or nil if the stat looks healthy.
+  /// Used by `forward(_:)` to emit `numericalAnomaly` only on bad output.
+  fileprivate func anomalyKind(for stat: TuberiaTensorStat) -> PixArtTelemetryEvent.AnomalyKind? {
+    if stat.hasNaN { return .nan }
+    if stat.hasInf { return .inf }
+    if abs(stat.max) > TuberiaTensorStat.defaultOutOfRangeThreshold { return .outOfRange }
+    if abs(stat.mean) < 1e-6 && stat.std < 1e-6 { return .zeroLatent }
+    return nil
   }
 }

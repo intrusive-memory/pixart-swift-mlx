@@ -1,4 +1,4 @@
-.PHONY: all resolve build test test-integration test-coverage test-python test-all lint clean help
+.PHONY: all resolve build test test-integration test-coverage test-python test-all test-tsan lint clean help
 
 SCHEME = pixart-swift-mlx
 DERIVED_DATA = $(HOME)/Library/Developer/Xcode/DerivedData
@@ -18,6 +18,14 @@ build: resolve
 test:
 	@echo "Running Swift tests..."
 	ACERVO_APP_GROUP_ID=group.intrusive-memory.models xcodebuild test -scheme $(SCHEME) -destination '$(DESTINATION)'
+
+test-tsan:  ## Run lock-contention tests with the Thread Sanitizer enabled
+	@echo "Running lock-contention tests with Thread Sanitizer..."
+	ACERVO_APP_GROUP_ID=group.intrusive-memory.models xcodebuild test \
+		-scheme $(SCHEME) \
+		-destination '$(DESTINATION)' \
+		-enableThreadSanitizer YES \
+		-only-testing:PixArtBackboneTests/PixArtTelemetryLockContentionTests
 
 test-integration:
 	@echo "Running integration tests (requires real model weights, ~2 GB unified memory)..."
@@ -56,6 +64,7 @@ help:
 	@echo "  test              Run Swift unit tests"
 	@echo "  test-integration  Run integration tests (requires real model weights; not run in CI)"
 	@echo "  test-coverage     Run tests with -enableCodeCoverage and print PixArtBackbone summary"
+	@echo "  test-tsan         Run lock-contention tests with Thread Sanitizer (-enableThreadSanitizer YES)"
 	@echo "  test-python       Run Python conversion script tests"
 	@echo "  test-all          Run all tests (Swift + Python)"
 	@echo "  lint         Format Swift sources with swift-format"
