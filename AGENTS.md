@@ -2,7 +2,7 @@
 
 This file provides comprehensive documentation for AI agents working with the pixart-swift-mlx codebase.
 
-**Version**: 0.7.0
+**Version**: 0.7.0-dev
 **Purpose**: Guide AI agents working on pixart-swift-mlx
 **Audience**: Claude Code, Gemini, and other AI development assistants
 
@@ -82,10 +82,58 @@ Without this, `Acervo.sharedModelsDirectory` traps with `fatalError`. See [Swift
 
 ## Telemetry
 
-PixArtBackbone ships a slim, boundary-only telemetry surface so hosts can diagnose weight-load, recipe-validation, and numerical-anomaly problems. Six events: `weightLoadComplete`, `weightUnloadComplete`, `recipeValidated`, `recipeValidationFailed`, `numericalAnomaly`, `errorThrown`. Hosts conform `PixArtTelemetryReporter`, install via `PixArtDiT.setTelemetry(_:)`, and pass to `recipe.validate(telemetry:)`.
+PixArtBackbone ships a **dual-seam** telemetry surface following the cross-library pattern documented in `SwiftVinetas/docs/INSTRUMENTATION_PATTERN.md`. Both seams expose the same `PixArtTelemetryEvent` enum (6 cases: `weightLoadComplete`, `weightUnloadComplete`, `recipeValidated`, `recipeValidationFailed`, `numericalAnomaly`, `errorThrown`); the difference is _where_ the reporter is installed and who wins.
+
+**Instance-bound seam** (`PixArtDiT.setTelemetry(_:)`): scoped to one `PixArtDiT` instance. Ideal for unit tests where you need to assert events from a specific instance in isolation. The instance reporter always takes precedence over the process-wide reporter when both are set.
+
+**Process-wide seam** (`PixArtTelemetry.setReporter(_:)`): a lock-guarded static slot on `public enum PixArtTelemetry`. CLI hosts and other process-wide consumers call this once at startup and receive events from every `PixArtDiT` emission site — even DiT instances that are lazily constructed deep inside another library's actor (e.g., `PixArtEngine` in SwiftVinetas). `PixArtRecipe.validate(telemetry:)` and `PixArtFP16Recipe.validate(telemetry:)` also fall back to `PixArtTelemetry.current` when no explicit `telemetry` argument is supplied, so recipe events reach the process-wide reporter automatically.
+
+Every emission site in `PixArtDiT` resolves through the `effectiveReporter` computed property (`instanceReporter ?? PixArtTelemetry.current`). Emission code never calls either seam directly.
+
+### Process-wide install (CLI host)
+
+```swift
+// At process startup (CLITelemetryBootstrap.enable)
+PixArtTelemetry.setReporter(pixartAdapter)  // pixartAdapter: PixArtTelemetryCLIAdapter
+
+// During teardown (CLITelemetryBootstrap.finish)
+PixArtTelemetry.setReporter(nil)
+```
+
+### Per-instance install (unit tests)
+
+```swift
+let dit = PixArtDiT(configuration: config)
+dit.setTelemetry(MockPixArtReporter())  // instance reporter; wins over process-wide when both set
+// ... exercise the instance ...
+dit.setTelemetry(nil)  // clean up
+```
+
+### Adding a new event case
+
+1. Add the case (and any nested enum values) to `PixArtTelemetryEvent` in `Sources/PixArtBackbone/Telemetry/PixArtTelemetryEvent.swift`. Every case and every associated-value type must be `Sendable`. Do NOT add a `runID` field — run identifiers belong at the host/sink layer.
+2. Emit via `await effectiveReporter?.capture(.newCase(...))` at the single canonical emission site inside `PixArtDiT` (or `PixArtRecipe` / `PixArtFP16Recipe` for recipe-phase events).
+3. Update the host's `PixArtEventEncoding.swift` (Encodable shim in SwiftVinetas) to handle the new case exhaustively.
+4. Add a test in `PixArtProcessWideTelemetryTests.swift` or the existing per-instance test file, covering both the instance-only and process-wide-only scenarios.
+
+### When to add a new event
+
+- Instrument boundaries, not internals. One event per phase entry/exit; not per-block or per-attention-head.
+- Each emission site must be the single canonical place for that event — do not emit the same logical event from multiple call sites.
+- All associated values must be `Sendable`. Struct payloads are preferred over class references.
+- Do not add a `runID` to the event cases themselves; the host attaches run context at the sink layer.
+- Prefer start/complete pairs (`operationStart` / `operationComplete`) for durational operations so the host can measure elapsed time.
+- Keep the hot path quiet: fire events at boundaries (weight load, recipe validation, anomaly detection), never inside tight inner loops.
+
+### Reference
 
 - [Sources/PixArtBackbone/Telemetry/README.md](Sources/PixArtBackbone/Telemetry/README.md) — Consumer guide: events, install pattern, example adapter, alerting recommendations
-- [docs/complete/stethoscope-furnace-01/RECONCILIATION.md](docs/complete/stethoscope-furnace-01/RECONCILIATION.md) — What the OPERATION STETHOSCOPE FURNACE brief described vs. what shipped after the `b585120` scope cut
+- [Sources/PixArtBackbone/Telemetry/PixArtTelemetry.swift](Sources/PixArtBackbone/Telemetry/PixArtTelemetry.swift) — Process-wide seam implementation
+- [Sources/PixArtBackbone/Telemetry/PixArtTelemetryEvent.swift](Sources/PixArtBackbone/Telemetry/PixArtTelemetryEvent.swift) — 6-case event enum
+- [Tests/PixArtBackboneTests/PixArtProcessWideTelemetryTests.swift](Tests/PixArtBackboneTests/PixArtProcessWideTelemetryTests.swift) — Dual-seam unit tests
+- [docs/complete/stethoscope-furnace-01/REQUIREMENTS-instrumentation.md](docs/complete/stethoscope-furnace-01/REQUIREMENTS-instrumentation.md) — Implementation requirements (shipped form)
+- [docs/complete/stethoscope-furnace-01/RECONCILIATION.md](docs/complete/stethoscope-furnace-01/RECONCILIATION.md) — What OPERATION STETHOSCOPE FURNACE shipped vs. the original brief
+- `SwiftVinetas/docs/INSTRUMENTATION_PATTERN.md` — Canonical cross-library dual-seam pattern
 
 ## Documentation Index
 
