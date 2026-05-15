@@ -63,6 +63,36 @@ This package depends on [SwiftAcervo](https://github.com/intrusive-memory/SwiftA
 
 Without this, `Acervo.sharedModelsDirectory` traps with `fatalError`. See [SwiftAcervo's USAGE.md](https://github.com/intrusive-memory/SwiftAcervo/blob/main/USAGE.md) for full details.
 
+## Telemetry
+
+PixArtBackbone emits `PixArtTelemetryEvent` (6 cases) at key boundaries: weight load/unload, recipe validation pass/fail, numerical anomalies (NaN, Inf, out-of-range, zero-latent), and errors. Subscribe once at process startup via `PixArtTelemetry.setReporter(_:)`, or install per-instance via `PixArtDiT.setTelemetry(_:)` for test isolation. Both seams deliver events from every `PixArtDiT` emission site; the instance reporter takes precedence when both are set.
+
+### Minimal subscriber
+
+```swift
+import PixArtBackbone
+
+struct PrintingReporter: PixArtTelemetryReporter {
+    func capture(_ event: PixArtTelemetryEvent) async {
+        print("[pixart] \(event)")
+    }
+}
+
+// Install process-wide (CLI / app bootstrap):
+PixArtTelemetry.setReporter(PrintingReporter())
+
+// Tear down during shutdown:
+PixArtTelemetry.setReporter(nil)
+```
+
+For test isolation, install on the specific instance instead:
+
+```swift
+dit.setTelemetry(PrintingReporter())  // instance reporter; wins over process-wide
+```
+
+See [Sources/PixArtBackbone/Telemetry/README.md](Sources/PixArtBackbone/Telemetry/README.md) for the full event table, alerting recommendations, and a production-ready logging adapter example.
+
 ## License
 
 MIT License. See [LICENSE](LICENSE) for details.
