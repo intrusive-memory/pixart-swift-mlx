@@ -162,6 +162,7 @@ public struct PixArtFP16Recipe: PipelineRecipe, Sendable {
   /// before `DiffusionPipeline.init`. The defaulted `nil` parameter preserves source
   /// compatibility for callers that do not yet wire telemetry.
   public func validate(telemetry: (any PixArtTelemetryReporter)? = nil) async throws {
+    let telemetry = telemetry ?? PixArtTelemetry.current
     let config = backboneConfig
     guard encoderConfig.embeddingDim == config.captionChannels else {
       let reason =

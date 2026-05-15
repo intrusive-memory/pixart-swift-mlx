@@ -47,6 +47,15 @@ public final class PixArtDiT: Module, Backbone, @unchecked Sendable {
     _telemetryLock.withLock { $0 }
   }
 
+  /// Returns the reporter to use for the current emission site.
+  ///
+  /// The instance reporter (installed via `setTelemetry(_:)`) takes precedence.
+  /// If no instance reporter is installed, falls back to the process-wide
+  /// `PixArtTelemetry.current` reporter.  Returns `nil` when neither is set.
+  private var effectiveReporter: (any PixArtTelemetryReporter)? {
+    currentTelemetry() ?? PixArtTelemetry.current
+  }
+
   // -- Patch Embedding --
   let patchEmbed: Conv2d
 
@@ -131,7 +140,7 @@ public final class PixArtDiT: Module, Backbone, @unchecked Sendable {
     // is NaN/Inf/out-of-range/zero-latent. The host pipeline owns denoise-loop
     // boundary events; PixArt is the choke point that signals "the backbone
     // produced bad output" without flooding per-step.
-    let telemetry = currentTelemetry()
+    let telemetry = effectiveReporter
 
     let latents = input.latents  // [B, H/8, W/8, 4]
     let conditioning = input.conditioning  // [B, seqLen, 4096]
@@ -204,7 +213,7 @@ public final class PixArtDiT: Module, Backbone, @unchecked Sendable {
     //   <key>.scales  — F16, shape [outDim, inDim/64]
     //   <key>.biases  — F16, shape [outDim, inDim/64]   (zero-point = min value)
     // FP16 safetensors (pixart-sigma-xl-dit-fp16): <key>.weight is F16 [outDim, inDim].
-    let telemetry = currentTelemetry()
+    let telemetry = effectiveReporter
     let start = Date()
 
     var params: [String: MLXArray] = [:]
@@ -256,7 +265,7 @@ public final class PixArtDiT: Module, Backbone, @unchecked Sendable {
   }
 
   public func unload() {
-    let telemetry = currentTelemetry()
+    let telemetry = effectiveReporter
     self.weights = nil
     self.isLoaded = false
 
