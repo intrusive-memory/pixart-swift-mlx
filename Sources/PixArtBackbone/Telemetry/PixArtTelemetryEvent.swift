@@ -20,6 +20,17 @@ public enum PixArtTelemetryEvent: Sendable {
   case recipeValidated(name: String, checksPassed: Int)
   case recipeValidationFailed(name: String, check: String, reason: String)
 
+  // --- Forward-pass output statistics ---
+  /// Emitted unconditionally at the exit of `PixArtDiT.forward(_:)` carrying the
+  /// sampled output tensor statistics. Pairs with the anomaly-gated
+  /// `numericalAnomaly(phase: .ditForward, ...)` — when the backbone is healthy
+  /// this is the only forward-pass event you see; when it is unhealthy you get
+  /// both. Downstream pipelines use the per-step `stat` history to attribute
+  /// quality regressions (e.g. color cast, saturation clipping) to either the
+  /// conditioning origin (bias visible from step 0) or the denoise loop
+  /// (bias accumulating over steps).
+  case backboneForwardComplete(stat: TuberiaTensorStat)
+
   // --- Side channels ---
   case numericalAnomaly(phase: AnomalyPhase, kind: AnomalyKind, stat: TuberiaTensorStat)
   case errorThrown(phase: ErrorPhase, errorDescription: String)

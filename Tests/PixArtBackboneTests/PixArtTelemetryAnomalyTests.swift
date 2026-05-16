@@ -6,13 +6,13 @@ import Tuberia
 @testable import PixArtBackbone
 
 /// Verifies that `PixArtDiT.forward(_:)` emits `numericalAnomaly(phase: .ditForward)`
-/// when the forward output is numerically bad, and emits nothing when the output is
-/// clean.
+/// when the forward output is numerically bad, and emits the happy-path
+/// `backboneForwardComplete(stat:)` event on every forward (with `numericalAnomaly`
+/// added alongside it when the output is unhealthy).
 ///
-/// In the slim surface there is **no happy-path forward event** — the only signal
-/// PixArt sends from the forward path is a side-channel anomaly. A NaN injected into
-/// the input latent propagates through the model and shows up in the output stat,
-/// where the exit-time check catches it.
+/// A NaN injected into the input latent propagates through the model and shows up
+/// in the output stat, where the exit-time check catches it and produces the
+/// anomaly event in addition to the always-emitted complete event.
 ///
 /// A fresh `PixArtDiT` instance per test prevents event contamination from other
 /// suites that exercise the forward path concurrently.
@@ -77,8 +77,8 @@ struct PixArtTelemetryAnomalyTests {
     }
   }
 
-  @Test("Clean input emits zero events from forward (boundary-only surface)")
-  func cleanInputEmitsNoEvents() async throws {
+  @Test("Clean input emits exactly one backboneForwardComplete and no anomaly")
+  func cleanInputEmitsBackboneForwardComplete() async throws {
     let dit = try Self.makeFreshDiT()
     let reporter = MockReporter()
     dit.setTelemetry(reporter)
@@ -89,8 +89,54 @@ struct PixArtTelemetryAnomalyTests {
     try await Task.sleep(nanoseconds: 100_000_000)
     let events = await reporter.snapshot()
 
+    let completes = events.compactMap { event -> TuberiaTensorStat? in
+      if case .backboneForwardComplete(let stat) = event { return stat }
+      return nil
+    }
+    let anomalies = events.compactMap { event -> PixArtTelemetryEvent.AnomalyKind? in
+      if case .numericalAnomaly(_, let kind, _) = event { return kind }
+      return nil
+    }
     #expect(
-      events.isEmpty,
-      "Expected forward(_:) with clean input to emit zero events; got \(events.count): \(events)")
+      completes.count == 1,
+      "Expected exactly one backboneForwardComplete; got \(completes.count) in \(events)")
+    #expect(
+      anomalies.isEmpty,
+      "Expected no numericalAnomaly for clean input; got \(anomalies) in \(events)")
+    if let stat = completes.first {
+      #expect(stat.hasNaN == false)
+      #expect(stat.hasInf == false)
+    }
+  }
+
+  @Test("NaN-poisoned latent emits backboneForwardComplete alongside the anomaly")
+  func nanPoisonedLatentEmitsBothEvents() async throws {
+    let dit = try Self.makeFreshDiT()
+    let reporter = MockReporter()
+    dit.setTelemetry(reporter)
+
+    let output = try dit.forward(Self.makeNaNPoisonedInput())
+    eval(output)
+
+    try await Task.sleep(nanoseconds: 100_000_000)
+    let events = await reporter.snapshot()
+
+    let completes = events.compactMap { event -> TuberiaTensorStat? in
+      if case .backboneForwardComplete(let stat) = event { return stat }
+      return nil
+    }
+    let anomalies = events.compactMap { event -> PixArtTelemetryEvent.AnomalyKind? in
+      if case .numericalAnomaly(_, let kind, _) = event { return kind }
+      return nil
+    }
+    #expect(
+      completes.count == 1,
+      "Expected exactly one backboneForwardComplete; got \(completes.count) in \(events)")
+    #expect(
+      anomalies == [.nan],
+      "Expected a single .nan anomaly alongside the complete event; got \(anomalies) in \(events)")
+    if let stat = completes.first {
+      #expect(stat.hasNaN == true)
+    }
   }
 }
