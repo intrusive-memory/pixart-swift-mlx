@@ -2,11 +2,21 @@
 """
 Convert SDXL VAE weights from PyTorch (HuggingFace) to float16 MLX safetensors.
 
-Source: stabilityai/sdxl-vae
+Source: madebyollin/sdxl-vae-fp16-fix
 Output: float16 MLX safetensors (~160 MB)
 
 NO quantization -- Conv2d layers do not benefit from weight-only quantization.
 All weights converted to float16.
+
+Why fp16-fix instead of stabilityai/sdxl-vae:
+  PixArt-Sigma's official ``vae/config.json`` ships ``scaling_factor: 0.13025``
+  and ``force_upcast: false``. Those values are the fp16-fix signature -- the
+  vanilla SDXL VAE uses 0.18215 and requires ``force_upcast: true`` to avoid
+  fp16 NaN overflow. Pairing vanilla weights with the 0.13025 scaling factor
+  mis-scales the latent magnitude going into the decoder and contributes to
+  warm/oversaturated output. Use the fp16-fix checkpoint to match the
+  scaling factor pinned in ``SDXLVAEDecoderConfiguration`` and in the
+  PixArtRecipe / PixArtFP16Recipe ``decoderConfig``.
 """
 
 import argparse
@@ -103,8 +113,13 @@ def main():
     parser.add_argument(
         "--model-id",
         type=str,
-        default="stabilityai/sdxl-vae",
-        help="HuggingFace model ID (default: stabilityai/sdxl-vae)",
+        default="madebyollin/sdxl-vae-fp16-fix",
+        help=(
+            "HuggingFace model ID (default: madebyollin/sdxl-vae-fp16-fix). "
+            "Must pair with scaling_factor=0.13025 in SDXLVAEDecoderConfiguration. "
+            "Do not switch to stabilityai/sdxl-vae without also updating the "
+            "scaling factor to 0.18215 -- mismatched pairs produce color casts."
+        ),
     )
     args = parser.parse_args()
 
