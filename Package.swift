@@ -60,7 +60,7 @@ let package = Package(
     sibling(
       "SwiftAcervo",
       remote: "https://github.com/intrusive-memory/SwiftAcervo.git",
-      from: "0.13.0"),
+      from: "0.13.1"),
     // Pinned to 0.5.x. swift-tokenizers 0.6.0 switched the Rust binary target
     // from an XCFramework to a UniFFI-based artifactbundle, which breaks the
     // `#if canImport(TokenizersRust)` path under xcodebuild. The 0.6.2 tag
