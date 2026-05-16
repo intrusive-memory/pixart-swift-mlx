@@ -1,10 +1,10 @@
 # PixArtBackbone Telemetry
 
-A slim, boundary-only telemetry surface for diagnosing weight-load, recipe-validation, and numerical-anomaly problems in the PixArt-Sigma DiT backbone. Hosts conform a reporter, install it on the DiT, and pass it to recipe validation. The library emits when something happens that the host should know about; it stays silent on the happy path.
+A boundary-only telemetry surface for diagnosing weight-load, recipe-validation, forward-pass numerics, and quality-regression problems in the PixArt-Sigma DiT backbone. Hosts conform a reporter, install it on the DiT, and pass it to recipe validation. The library emits when something happens that the host should know about, plus one always-on per-forward statistics event so downstream pipelines can do per-step attribution.
 
 ## What you get
 
-Six event cases on `PixArtTelemetryEvent`:
+Seven event cases on `PixArtTelemetryEvent`:
 
 | Event | When it fires | Use it to |
 |---|---|---|
@@ -12,16 +12,20 @@ Six event cases on `PixArtTelemetryEvent`:
 | `weightUnloadComplete` | After `PixArtDiT.unload()` | Confirm release for memory accounting |
 | `recipeValidated(name, checksPassed)` | When `recipe.validate(telemetry:)` passes all checks | Confirm shape contracts before pipeline init |
 | `recipeValidationFailed(name, check, reason)` | A specific shape check failed | Alert: misconfigured pipeline; recipe will also throw |
+| `backboneForwardComplete(stat)` | Unconditionally at every `PixArtDiT.forward(_:)` exit | Per-step output statistics for downstream quality-regression attribution (color cast, saturation clip, etc.) — see below |
 | `numericalAnomaly(phase, kind, stat)` | DiT output sampled at forward exit is NaN / Inf / out-of-range / zero-latent | The headline diagnostic. Backbone produced bad output; investigate weights, conditioning, or upstream noise |
 | `errorThrown(phase, errorDescription)` | Recipe validation throws (paired with `recipeValidationFailed`) | Single-channel sink for all thrown errors |
 
 `AnomalyPhase` is currently always `.ditForward` (or `.weightLoad` if we extend later). `AnomalyKind` is `.nan`, `.inf`, `.outOfRange`, or `.zeroLatent`. `stat` is a `TuberiaTensorStat` from SwiftTuberia carrying min/max/mean/std/hasNaN/hasInf.
 
+### Why `backboneForwardComplete` exists
+
+Downstream pipelines (SwiftTuberia / Vinetas) need to attribute quality regressions to a source. Example: PixArt-Sigma image output exhibits a strong warm-color cast with saturated tails getting clipped. Without per-step backbone output stats, the consumer cannot tell whether the warm bias is already present in the latent at step 0 (→ T5 / conditioning origin) or accumulates over the denoising loop (→ scheduler / DiT origin). The previous slim surface treated this as a downstream sampling problem, but the consumer pipeline only sees the final tensor handed off to the VAE — it cannot sample backbone-internal output without holding a reference into this library. Emitting one stat per forward is the cheapest possible primitive that unblocks that attribution.
+
 ## What you do NOT get (deliberately)
 
-- **No per-step, per-block, or per-attention-head events.** A `numericalAnomaly` points at the region; finer instrumentation is added in a follow-up iteration only after a real failure demands it.
-- **No happy-path forward-pass events.** Zero events fire when `forward(_:)` produces healthy output. This keeps the hot path quiet and the noise floor at zero.
-- **No `stepIndex` correlation.** `BackboneInput` doesn't carry one in SwiftTuberia 0.7.0. Hosts that need per-step correlation should reconstruct it from their denoise-loop wrapper.
+- **No per-block or per-attention-head events.** A `numericalAnomaly` or the per-step `backboneForwardComplete` stat history points at the region; finer-grained per-layer instrumentation is added only after a real failure demands it.
+- **No `stepIndex` correlation.** `BackboneInput` doesn't carry one in SwiftTuberia 0.7.0. Hosts that need per-step correlation should reconstruct it from their denoise-loop wrapper — the emission order from a single thread matches the call order.
 
 If you need finer granularity, file an issue describing the actual failure you're trying to localize — the surface is intentionally slim and grows only on demand.
 
@@ -50,6 +54,9 @@ actor MyPixArtReporter: PixArtTelemetryReporter {
 
     case .recipeValidationFailed(let name, let check, let reason):
       log.error("\(name) failed check \(check): \(reason)")
+
+    case .backboneForwardComplete(let stat):
+      log.debug("PixArt forward stat — min=\(stat.min) max=\(stat.max) mean=\(stat.mean) std=\(stat.std)")
 
     case .numericalAnomaly(let phase, let kind, let stat):
       log.fault("PixArt anomaly in \(phase.rawValue): \(kind.rawValue) — min=\(stat.min) max=\(stat.max) mean=\(stat.mean) std=\(stat.std)")
@@ -98,6 +105,8 @@ let reporter: any PixArtTelemetryReporter = isDebugBuild
 If you only wire one signal: alert on `numericalAnomaly` with `kind: .nan` or `.inf`. That's the "the backbone produced unusable output" smoke alarm and almost always indicates a real bug (bad weights, wrong dtype path, upstream conditioning corruption).
 
 Treat `.outOfRange` and `.zeroLatent` as warnings — they can occur briefly during normal denoising but a sustained stream of them across multiple forward passes is a problem.
+
+`backboneForwardComplete` is high-volume (one per forward, so e.g. 40 events for a 20-step CFG run). Aggregate it — record stat history per denoise loop, then look for drift signatures (rising/falling `mean`, widening `std`, asymmetric `min`/`max` tails) instead of alerting on individual emissions. The conditioning-vs-denoise attribution lives in this delta: bias visible at step 0 points at the conditioning encoder; bias that grows over steps points at the scheduler or DiT.
 
 `recipeValidationFailed` always indicates a misconfigured pipeline; the recipe will also throw, so the event is mostly useful for centralized logging.
 

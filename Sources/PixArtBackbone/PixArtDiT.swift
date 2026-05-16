@@ -135,11 +135,14 @@ public final class PixArtDiT: Module, Backbone, @unchecked Sendable {
   // MARK: - Forward Pass
 
   public func forward(_ input: BackboneInput) throws -> MLXArray {
-    // Slim telemetry: zero happy-path events. We sample the output stat ONCE at
-    // exit and emit `numericalAnomaly(phase: .ditForward)` only when the output
-    // is NaN/Inf/out-of-range/zero-latent. The host pipeline owns denoise-loop
-    // boundary events; PixArt is the choke point that signals "the backbone
-    // produced bad output" without flooding per-step.
+    // Telemetry: emit `backboneForwardComplete(stat:)` once per forward,
+    // carrying the sampled output tensor statistics, and additionally emit
+    // `numericalAnomaly(phase: .ditForward, ...)` when the output is
+    // NaN/Inf/out-of-range/zero-latent. The happy-path event was added so
+    // downstream pipelines (SwiftTuberia / Vinetas) can attribute quality
+    // regressions like color cast or saturation clipping to either the
+    // conditioning origin (visible from step 0) or the denoise loop
+    // (accumulating over steps); the anomaly event remains the smoke alarm.
     let telemetry = effectiveReporter
 
     let latents = input.latents  // [B, H/8, W/8, 4]
@@ -186,10 +189,15 @@ public final class PixArtDiT: Module, Backbone, @unchecked Sendable {
 
     if let telemetry {
       let outputStat = TuberiaTensorStat.sample(output)
-      if let anomaly = anomalyKind(for: outputStat) {
-        let event = PixArtTelemetryEvent.numericalAnomaly(
-          phase: .ditForward, kind: anomaly, stat: outputStat)
-        Task { await telemetry.capture(event) }
+      let completeEvent = PixArtTelemetryEvent.backboneForwardComplete(stat: outputStat)
+      let anomalyEvent: PixArtTelemetryEvent? = anomalyKind(for: outputStat).map { kind in
+        .numericalAnomaly(phase: .ditForward, kind: kind, stat: outputStat)
+      }
+      Task {
+        await telemetry.capture(completeEvent)
+        if let anomalyEvent {
+          await telemetry.capture(anomalyEvent)
+        }
       }
     }
 
