@@ -18,7 +18,7 @@ let package = Package(
     .package(
       url: "https://github.com/intrusive-memory/SwiftTuberia.git", .upToNextMajor(from: "0.7.2")),
     .package(
-      url: "https://github.com/intrusive-memory/SwiftAcervo.git", .upToNextMajor(from: "0.13.1")),
+      url: "https://github.com/intrusive-memory/SwiftAcervo.git", .upToNextMajor(from: "0.14.0")),
     // Pinned to 0.5.x. swift-tokenizers 0.6.0 switched the Rust binary target
     // from an XCFramework to a UniFFI-based artifactbundle, which breaks the
     // `#if canImport(TokenizersRust)` path under xcodebuild. The 0.6.2 tag
