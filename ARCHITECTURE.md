@@ -100,23 +100,56 @@ struct PixArtRecipe: PipelineRecipe {
 
 ## Acervo Registration
 
+Requires **SwiftAcervo ≥ 0.16**. This package owns the two PixArt-Sigma backbone descriptors only — T5-XXL encoder and SDXL VAE decoder are registered automatically by `TuberiaCatalog` on module load, so do **not** re-register them here.
+
 ```swift
+import SwiftAcervo
+import TuberiaCatalog
+
 public enum PixArtComponents {
     public static let registered: Bool = {
+        CatalogRegistration.shared.ensureRegistered()  // T5 + SDXL VAE
         Acervo.register([
-            // Owned by this package
-            ComponentDescriptor(id: "pixart-sigma-xl-dit-int4", type: .backbone,
-                                huggingFaceRepo: "intrusive-memory/pixart-sigma-xl-dit-int4-mlx", ...),
-            // Catalog components (re-registered for safety, deduplicated by Acervo)
-            ComponentDescriptor(id: "t5-xxl-encoder-int4", type: .encoder,
-                                huggingFaceRepo: "intrusive-memory/t5-xxl-int4-mlx", ...),
-            ComponentDescriptor(id: "sdxl-vae-decoder-fp16", type: .decoder,
-                                huggingFaceRepo: "intrusive-memory/sdxl-vae-fp16-mlx", ...),
+            ComponentDescriptor(
+                id: "pixart-sigma-xl-dit-int4",
+                type: .backbone,
+                displayName: "PixArt-Sigma XL DiT (int4)",
+                repoId: "intrusive-memory/pixart-sigma-xl-dit-int4-mlx",
+                minimumMemoryBytes: 800_000_000,
+                metadata: [
+                    "component_role": "backbone",
+                    "quantization": "int4",
+                    "architecture": "DiT-XL",
+                ]
+            ),
+            ComponentDescriptor(
+                id: "pixart-sigma-xl-dit-fp16",
+                type: .backbone,
+                displayName: "PixArt-Sigma XL DiT (fp16)",
+                repoId: "intrusive-memory/pixart-sigma-xl-dit-fp16-mlx",
+                minimumMemoryBytes: 2_500_000_000,
+                metadata: [
+                    "component_role": "backbone",
+                    "quantization": "fp16",
+                    "architecture": "DiT-XL",
+                ]
+            ),
         ])
         return true
     }()
 }
 ```
+
+### Slug-vs-`id` warning
+
+Acervo looks up CDN manifests by component `id`, **not** by HuggingFace repo name. The registered `id`s here drop the `-mlx` suffix (`pixart-sigma-xl-dit-int4`, not `pixart-sigma-xl-dit-int4-mlx`). When publishing these models to the CDN, the shipping invocation MUST pin `--slug` explicitly to match the `id`:
+
+```bash
+acervo ship intrusive-memory/pixart-sigma-xl-dit-int4-mlx --slug pixart-sigma-xl-dit-int4
+acervo ship intrusive-memory/pixart-sigma-xl-dit-fp16-mlx --slug pixart-sigma-xl-dit-fp16
+```
+
+Letting `Acervo.slugify(...)` derive the slug from the HF repo would publish under a path the consumer can never find.
 
 ---
 

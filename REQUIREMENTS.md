@@ -1,23 +1,24 @@
 # pixart-swift-mlx — Requirements
 
-**Scope**: Active requirements for pixart-swift-mlx, derived from a 3-pass architectural evaluation conducted 2026-05-05. Supersedes the prior architecture-and-API spec, whose substantive content is already implemented in `Sources/PixArtBackbone/`. Open work below.
-**Status**: Pass 1 complete (no work). Pass 2 and Pass 3 require implementation.
+**Scope**: Active requirements for pixart-swift-mlx, derived from a 3-pass architectural evaluation conducted 2026-05-05. Supersedes the prior architecture-and-API spec, whose substantive content is already implemented in `Sources/PixArtBackbone/`.
+**Status (2026-05-23)**: All three passes complete. Pass 1 (Acervo metadata-driven conversion) is reinforced by the SwiftAcervo 0.16 "ask the library" contract — see [AGENTS.md](AGENTS.md) for the philosophical change. Pass 3 (CLI removal) shipped — `Sources/PixArtCLI/` no longer exists, no `swift-argument-parser` dep in `Package.swift`. Pass 2 (test suite) shipped — 153 tests / 23 suites pass on `make test`.
 **Audience**: Maintainers and AI agents.
 
 ---
 
 ## Pass 1 — SwiftAcervo Metadata-Driven Conversion
 
-**Status: COMPLETE. No action required.**
+**Status: COMPLETE. Reinforced by SwiftAcervo 0.16 contract.**
 
-Audit confirmed `PixArtBackbone` and `PixArtCLI` consume SwiftAcervo by component ID only. No source file constructs paths, calls `appendingPathComponent` against an Acervo model directory, or hardcodes runtime filenames.
+Audit confirmed `PixArtBackbone` consumes SwiftAcervo by component ID only. No source file constructs paths, calls `appendingPathComponent` against an Acervo model directory, or hardcodes runtime filenames.
+
+The original Pass 1 goal ("manifest as runtime source of truth") was promoted to a hard contract in SwiftAcervo 0.16: `CDNManifest.primaryRepo` / `.components` are now required wire-format fields; `ModelAvailability` gained a `.partial(missing:)` case; consumers MUST iterate manifests rather than filesystem directories. See [AGENTS.md](AGENTS.md) "SwiftAcervo integration" for the full description, and [`TODO.md`](TODO.md) for the local-package audit against 0.16. The two CDN-hosted backbones still need re-shipping with `acervo` ≥ 0.16 (tracked in `../MODELS-TO-SHIP.md`, outside the repo).
 
 Reference points (good patterns, do not change):
 
-- `Sources/PixArtBackbone/PixArtComponents.swift:6-30` — bare `ComponentDescriptor` initializer; manifest is runtime source of truth.
+- `Sources/PixArtBackbone/PixArtComponents.swift` — un-hydrated `ComponentDescriptor` initializer; manifest is runtime source of truth. Component `id`s drop the `-mlx` suffix from the HF repo name; CDN ship invocations must pin `--slug` to match.
 - `Sources/PixArtBackbone/PixArtRecipe.swift`, `PixArtFP16Recipe.swift` — components exposed as Acervo IDs only.
-- `Sources/PixArtBackbone/PixArtDiT.swift:189-248` — `apply(weights:)` operates on pre-loaded `MLXArray` tensors, never opens a file.
-- `Sources/PixArtCLI/DownloadCommand.swift` — uses `Acervo.ensureComponentReady`; `progress.fileName` is populated by Acervo from manifest.
+- `Sources/PixArtBackbone/PixArtDiT.swift` — `apply(weights:)` operates on pre-loaded `MLXArray` tensors, never opens a file.
 
 The `safetensors` / `config.json` strings present in `WeightMapping.swift` and `PixArtDiT.swift` are doc comments describing tensor key suffixes, not filename references. Cosmetic only; out of scope.
 
@@ -25,9 +26,7 @@ The `safetensors` / `config.json` strings present in `WeightMapping.swift` and `
 
 ## Pass 3 — CLI / Downloader Removal
 
-**Status: Architecture pivot complete inside `PixArtBackbone`. User-visible CLI surface still in tree.**
-
-The user has stated the CLI and the model downloader are removed in favor of SwiftAcervo. The library reflects that. Source files, Package.swift entries, Makefile targets, and documentation referencing the CLI do not. Removal is a single mechanical PR.
+**Status: COMPLETE.** `Sources/PixArtCLI/` no longer exists, `swift-argument-parser` is no longer in `Package.swift`, and the Makefile carries no `install` or `release` targets. The remaining sub-items (R3.1–R3.6) are preserved below for historical reference; they describe the work as it was scoped, not work still to do.
 
 ### R3.1 — Delete `PixArtCLI` source target
 
