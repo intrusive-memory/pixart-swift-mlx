@@ -67,9 +67,32 @@ make help         # Show all targets
 5. NEVER create files unless necessary
 6. Follow agent-specific instructions — see [CLAUDE.md](CLAUDE.md) or [GEMINI.md](GEMINI.md)
 
-## App Group configuration (required)
+## SwiftAcervo integration
 
-This package depends on [SwiftAcervo](https://github.com/intrusive-memory/SwiftAcervo) for shared model storage. SwiftAcervo v0.10.0 resolves its App Group ID in this order: `ACERVO_APP_GROUP_ID` env var → `com.apple.security.application-groups` entitlement (macOS only) → `fatalError`. There is **no silent fallback**.
+This package depends on [SwiftAcervo](https://github.com/intrusive-memory/SwiftAcervo) **v0.16+** for component registration and shared model storage.
+
+### What this package registers
+
+`PixArtComponents.registered` (lazy, idempotent) registers two `ComponentDescriptor`s with Acervo's in-memory catalog: `pixart-sigma-xl-dit-int4` (production, ~800 MB) and `pixart-sigma-xl-dit-fp16` (validation, ~2.5 GB). T5-XXL encoder and SDXL VAE decoder are registered separately by `TuberiaCatalog` on module load — this package does **not** re-register them.
+
+### Component IDs vs. HuggingFace repo IDs
+
+The registered component `id`s (`pixart-sigma-xl-dit-int4`, `pixart-sigma-xl-dit-fp16`) **drop the `-mlx` suffix** from the upstream HF repo name (`intrusive-memory/pixart-sigma-xl-dit-int4-mlx`). Acervo looks up CDN manifests by component `id`, not by HF repo name — so any `acervo ship` of these models MUST pin `--slug pixart-sigma-xl-dit-int4` (or `-fp16`) explicitly. Letting `Acervo.slugify(...)` derive the slug from the HF repo would publish under a path the consumer can never find.
+
+### Philosophical change in SwiftAcervo 0.16 ("ask the library")
+
+SwiftAcervo 0.16 hardened the contract between consumers and the manifest. The cross-cutting rule is: **the manifest is the source of truth — do not poke the filesystem, do not track download state yourself, do not hand-build manifests.** Concrete consequences:
+
+- **`ModelAvailability` is now a 4-case enum** (`.notAvailable`, `.downloading`, `.available`, `.partial(missing:)`). Any consumer that `switch`es over it must handle `.partial` exhaustively. Do NOT keep a parallel `isDownloading: Bool` flag — call `await Acervo.availability(modelId)` for the authoritative state.
+- **`CDNManifest.primaryRepo` and `.components` are required wire-format fields.** Manifests published by `acervo` < 0.16 strict-decode-fail on a fresh consumer download. Every CDN-hosted model this package registers must be re-shipped with `acervo` ≥ 0.16.
+- **Replace `FileManager.contentsOfDirectory(...)` enumerations with `manifest.files.filter { ... }`.** Directory scans drift when the manifest changes; manifest iteration does not. (This package contains no such scans — runtime weight loading happens in downstream consumers like `SwiftVinetas`.)
+- **`Acervo.swift` has been decomposed into per-feature source files.** Don't link to specific line numbers in agent docs; use stable type/method names instead.
+
+For the migration audit specific to this package, see [`TODO.md`](TODO.md). For the cross-repo re-shipping checklist, see `../MODELS-TO-SHIP.md` (outside the repo).
+
+### App Group configuration (required)
+
+Acervo resolves its App Group ID in this order: `ACERVO_APP_GROUP_ID` env var → `com.apple.security.application-groups` entitlement (macOS only) → `fatalError`. There is **no silent fallback**.
 
 - **Signed UI apps (macOS / iOS)**: declare `com.apple.security.application-groups` with `group.intrusive-memory.models` in your `.entitlements` file. iOS apps additionally need `ACERVO_APP_GROUP_ID=group.intrusive-memory.models` in the launch environment.
 - **Scripts, CI jobs, test runners**: export `ACERVO_APP_GROUP_ID=group.intrusive-memory.models` in the shell or job environment. The standard place is `~/.zprofile`:
@@ -78,7 +101,7 @@ This package depends on [SwiftAcervo](https://github.com/intrusive-memory/SwiftA
     export ACERVO_APP_GROUP_ID=group.intrusive-memory.models
     ```
 
-Without this, `Acervo.sharedModelsDirectory` traps with `fatalError`. See [SwiftAcervo's USAGE.md](https://github.com/intrusive-memory/SwiftAcervo/blob/main/USAGE.md) for full details.
+Without this, `Acervo.sharedModelsDirectory` traps with `fatalError`. See [SwiftAcervo's USAGE.md](https://github.com/intrusive-memory/SwiftAcervo/blob/main/USAGE.md) and [UPGRADING.md](https://github.com/intrusive-memory/SwiftAcervo/blob/main/UPGRADING.md) for full details.
 
 ## Telemetry
 
