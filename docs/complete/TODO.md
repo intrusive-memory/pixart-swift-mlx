@@ -1,8 +1,10 @@
 # SwiftAcervo 0.16.0 Upgrade
 
+> **Status: COMPLETE / ARCHIVED (2026-06-20).** Shipped in v0.7.5 (`a234c84 Release v0.7.5: SwiftAcervo 0.16.0 dep bump (#25)`); `Package.swift` now pins `from: "0.16.0"`. Retained as a historical record.
+
 - Target version: **0.16.0**
 - Current pinned version: **0.14.0** (`Package.resolved`; `Package.swift` already uses `.upToNextMajor(from: "0.14.0")`)
-- Authoritative migration guide: [`/Users/stovak/Projects/SwiftAcervo/UPGRADING.md`](../SwiftAcervo/UPGRADING.md)
+- Authoritative migration guide: [`/Users/stovak/Projects/SwiftAcervo/UPGRADING.md`](../../../SwiftAcervo/UPGRADING.md)
 
 This repo has a very narrow SwiftAcervo surface (component-descriptor registration only). It does not switch over `ModelAvailability`, does not call `availability(_:)` / `ensureAvailable(...)` / `isModelAvailable(...)`, does not hand-build `CDNManifest` fixtures, and does not poke the filesystem under Acervo-managed directories. The 0.16.0 breaking changes (new `.partial` case, strict `CDNManifest` decode, slug-keyed APIs, `Acervo.swift` source decomposition) therefore have **no impact on existing code**.
 

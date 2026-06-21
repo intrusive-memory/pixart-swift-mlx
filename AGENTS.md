@@ -88,7 +88,7 @@ SwiftAcervo 0.16 hardened the contract between consumers and the manifest. The c
 - **Replace `FileManager.contentsOfDirectory(...)` enumerations with `manifest.files.filter { ... }`.** Directory scans drift when the manifest changes; manifest iteration does not. (This package contains no such scans — runtime weight loading happens in downstream consumers like `SwiftVinetas`.)
 - **`Acervo.swift` has been decomposed into per-feature source files.** Don't link to specific line numbers in agent docs; use stable type/method names instead.
 
-For the migration audit specific to this package, see [`TODO.md`](TODO.md). For the cross-repo re-shipping checklist, see `../MODELS-TO-SHIP.md` (outside the repo).
+For the migration audit specific to this package, see [`docs/complete/TODO.md`](docs/complete/TODO.md) (completed — SwiftAcervo 0.16.0 bump shipped in v0.7.5). For the cross-repo re-shipping checklist, see `../MODELS-TO-SHIP.md` (outside the repo).
 
 ### App Group configuration (required)
 
@@ -163,7 +163,7 @@ dit.setTelemetry(nil)  // clean up
 - [AGENTS.md](AGENTS.md) — Universal agent documentation (this file)
 - [CLAUDE.md](CLAUDE.md) — Claude-specific instructions
 - [GEMINI.md](GEMINI.md) — Gemini-specific instructions
-- [REQUIREMENTS.md](REQUIREMENTS.md) — Full specification
+- [docs/complete/REQUIREMENTS.md](docs/complete/REQUIREMENTS.md) — Full specification (all passes complete; archived)
 - [ARCHITECTURE.md](ARCHITECTURE.md) — Detailed architecture notes
 - [README.md](README.md) — User-facing documentation
 - [Sources/PixArtBackbone/Telemetry/README.md](Sources/PixArtBackbone/Telemetry/README.md) — Telemetry consumer guide
