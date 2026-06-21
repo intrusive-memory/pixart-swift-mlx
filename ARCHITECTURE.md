@@ -1,6 +1,6 @@
 # pixart-swift-mlx — Architecture (Ecosystem Interface Reference)
 
-**Companion to**: [`REQUIREMENTS.md`](REQUIREMENTS.md)
+**Companion to**: [`docs/complete/REQUIREMENTS.md`](docs/complete/REQUIREMENTS.md)
 **Role in ecosystem**: First model plugin. Provides PixArt-Sigma DiT backbone + recipe. Validates the entire pipeline architecture end-to-end.
 
 ---

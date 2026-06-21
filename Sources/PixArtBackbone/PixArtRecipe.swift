@@ -90,11 +90,18 @@ public struct PixArtRecipe: PipelineRecipe, Sendable {
   /// - componentId: "sdxl-vae-decoder-fp16" — float16 (Conv2d layers do not benefit from int4)
   /// - latentChannels: 4 — matches PixArtDiT.outputLatentChannels
   /// - scalingFactor: 0.13025 — standard SDXL VAE scaling factor
+  /// - decodeTileLatentSize: 256 — bound the VAE decode activation transient (#45/#83).
+  ///   256 latent px (2048 output px) is the cutoff above which the single-pass
+  ///   decode spike drives memory pressure: every iOS aspect-ratio tier is ≤256
+  ///   latent and so decodes single-pass, bit-for-bit identical (no fidelity or
+  ///   speed change); the macOS television/4K tiers (270–480 latent) exceed it and
+  ///   decode tile-by-tile, capping the transient at a ~2048px-class footprint.
   public var decoderConfig: SDXLVAEDecoderConfiguration {
     SDXLVAEDecoderConfiguration(
       componentId: "sdxl-vae-decoder-fp16",
       latentChannels: 4,
-      scalingFactor: 0.13025
+      scalingFactor: 0.13025,
+      decodeTileLatentSize: 256
     )
   }
 

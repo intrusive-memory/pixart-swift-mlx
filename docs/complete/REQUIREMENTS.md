@@ -1,7 +1,8 @@
 # pixart-swift-mlx — Requirements
 
 **Scope**: Active requirements for pixart-swift-mlx, derived from a 3-pass architectural evaluation conducted 2026-05-05. Supersedes the prior architecture-and-API spec, whose substantive content is already implemented in `Sources/PixArtBackbone/`.
-**Status (2026-05-23)**: All three passes complete. Pass 1 (Acervo metadata-driven conversion) is reinforced by the SwiftAcervo 0.16 "ask the library" contract — see [AGENTS.md](AGENTS.md) for the philosophical change. Pass 3 (CLI removal) shipped — `Sources/PixArtCLI/` no longer exists, no `swift-argument-parser` dep in `Package.swift`. Pass 2 (test suite) shipped — 153 tests / 23 suites pass on `make test`.
+**Status (2026-05-23)**: All three passes complete. Pass 1 (Acervo metadata-driven conversion) is reinforced by the SwiftAcervo 0.16 "ask the library" contract — see [AGENTS.md](../../AGENTS.md) for the philosophical change. Pass 3 (CLI removal) shipped — `Sources/PixArtCLI/` no longer exists, no `swift-argument-parser` dep in `Package.swift`. Pass 2 (test suite) shipped — 153 tests / 23 suites pass on `make test`.
+**Archived (2026-06-20)**: All work in this document is complete; moved to `docs/complete/` as a historical record.
 **Audience**: Maintainers and AI agents.
 
 ---
@@ -12,7 +13,7 @@
 
 Audit confirmed `PixArtBackbone` consumes SwiftAcervo by component ID only. No source file constructs paths, calls `appendingPathComponent` against an Acervo model directory, or hardcodes runtime filenames.
 
-The original Pass 1 goal ("manifest as runtime source of truth") was promoted to a hard contract in SwiftAcervo 0.16: `CDNManifest.primaryRepo` / `.components` are now required wire-format fields; `ModelAvailability` gained a `.partial(missing:)` case; consumers MUST iterate manifests rather than filesystem directories. See [AGENTS.md](AGENTS.md) "SwiftAcervo integration" for the full description, and [`TODO.md`](TODO.md) for the local-package audit against 0.16. The two CDN-hosted backbones still need re-shipping with `acervo` ≥ 0.16 (tracked in `../MODELS-TO-SHIP.md`, outside the repo).
+The original Pass 1 goal ("manifest as runtime source of truth") was promoted to a hard contract in SwiftAcervo 0.16: `CDNManifest.primaryRepo` / `.components` are now required wire-format fields; `ModelAvailability` gained a `.partial(missing:)` case; consumers MUST iterate manifests rather than filesystem directories. See [AGENTS.md](../../AGENTS.md) "SwiftAcervo integration" for the full description, and [`TODO.md`](TODO.md) for the local-package audit against 0.16. The two CDN-hosted backbones still need re-shipping with `acervo` ≥ 0.16 (tracked in `../../../MODELS-TO-SHIP.md`, outside the repo).
 
 Reference points (good patterns, do not change):
 
