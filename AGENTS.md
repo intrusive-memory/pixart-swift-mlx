@@ -158,6 +158,22 @@ dit.setTelemetry(nil)  // clean up
 - [docs/complete/stethoscope-furnace-01/RECONCILIATION.md](docs/complete/stethoscope-furnace-01/RECONCILIATION.md) — What OPERATION STETHOSCOPE FURNACE shipped vs. the original brief
 - `SwiftVinetas/docs/INSTRUMENTATION_PATTERN.md` — Canonical cross-library dual-seam pattern
 
+## Queryable Codemap
+
+A prebuilt [graphify](https://pypi.org/project/graphifyy/) knowledge graph of this
+codebase lives in [`graphify-out/`](graphify-out/) (648 nodes · 944 edges). **Prefer
+querying it before grepping** for architecture or "what connects to what" questions:
+
+```bash
+graphify query "How does X flow through the system?"
+graphify path "TypeA" "TypeB"      # shortest path between two nodes
+graphify explain "SomeType"        # plain-language node explanation
+```
+
+Human-readable summary: [`graphify-out/GRAPH_REPORT.md`](graphify-out/GRAPH_REPORT.md).
+Refresh after significant changes with `/codemap` (or
+`graphify . --backend claude-cli`).
+
 ## Documentation Index
 
 - [AGENTS.md](AGENTS.md) — Universal agent documentation (this file)
