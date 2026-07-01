@@ -92,7 +92,7 @@ struct PixArtInt4InMemoryTests {
     "DiTBlock forward: QuantizedLinear (int4-resident) matches dequantized-fp16 within tight tolerance, no NaN"
   )
   func forwardParityQuantizedVsDequantized() throws {
-    MLXRandom.seed(20260701)
+    MLXRandom.seed(20_260_701)
 
     // Reference block loaded with dequantized fp16 weights (the legacy behavior).
     let blockRef = DiTBlock(
@@ -164,7 +164,8 @@ struct PixArtInt4InMemoryTests {
     let ratio = Double(quantizedBytes) / Double(fp16EquivalentBytes)
     #expect(
       ratio < 0.35,
-      "resident quantized bytes \(quantizedBytes) vs fp16 \(fp16EquivalentBytes) (ratio \(ratio)) — int4 should be ~1/4")
+      "resident quantized bytes \(quantizedBytes) vs fp16 \(fp16EquivalentBytes) (ratio \(ratio)) — int4 should be ~1/4"
+    )
   }
 
   private static func applyInt4(block: DiTBlock, bases: Set<String>, int4: [String: MLXArray]) {
