@@ -221,21 +221,31 @@ public final class PixArtDiT: Module, Backbone, @unchecked Sendable {
     //   <key>.scales  — F16, shape [outDim, inDim/64]
     //   <key>.biases  — F16, shape [outDim, inDim/64]   (zero-point = min value)
     // FP16 safetensors (pixart-sigma-xl-dit-fp16): <key>.weight is F16 [outDim, inDim].
+    //
+    // Memory contract: the int4 checkpoint MUST stay quantized in memory. We do NOT
+    // dequantize to fp16 (that would blow the DiT up from ~0.3 GB to ~1.2 GB). Instead
+    // we convert the quantizable `Linear` projections that ship an int4 sidecar into
+    // `QuantizedLinear` and route the packed uint32 weight + scales + biases straight in.
+    // The forward pass then runs the int4 `quantizedMM` kernel — mathematically identical
+    // to `dequantized(w) @ x` — with no fp16 weight tensor ever materialized.
     let telemetry = effectiveReporter
     let start = Date()
 
-    var params: [String: MLXArray] = [:]
-    var scalesMap: [String: MLXArray] = [:]
-    var biasesMap: [String: MLXArray] = [:]
-
-    for (key, tensor) in weights.parameters {
+    // 1. Discover which module paths ship as int4 in this weight set. A quantized
+    //    projection has all three of: <base>.weight (uint32 packed), <base>.scales,
+    //    and <base>.biases. fp16-stored layers (patchEmbed, embedders, .bias, etc.)
+    //    have none of these and take the passthrough path unchanged.
+    var scalesBases = Set<String>()
+    var biasesBases = Set<String>()
+    for (key, _) in weights.parameters {
       if key.hasSuffix(".scales") {
-        scalesMap[String(key.dropLast(".scales".count))] = tensor
+        scalesBases.insert(String(key.dropLast(".scales".count)))
       } else if key.hasSuffix(".biases") {
-        biasesMap[String(key.dropLast(".biases".count))] = tensor
+        biasesBases.insert(String(key.dropLast(".biases".count)))
       }
     }
 
+    var quantizedBases = Set<String>()
     var paramCount = 0
     for (key, tensor) in weights.parameters {
       if key.hasSuffix(".scales") || key.hasSuffix(".biases") {
@@ -243,21 +253,27 @@ public final class PixArtDiT: Module, Backbone, @unchecked Sendable {
       }
       paramCount += 1
 
+      guard key.hasSuffix(".weight"), tensor.dtype == .uint32 else { continue }
       let base = String(key.dropLast(".weight".count))
-      if key.hasSuffix(".weight"),
-        let scales = scalesMap[base],
-        let biases = biasesMap[base],
-        tensor.dtype == .uint32
-      {
-        let floatWeight = dequantized(
-          tensor, scales: scales, biases: biases, groupSize: 64, bits: 4)
-        params[key] = floatWeight.asType(.float16)
-      } else {
-        params[key] = tensor
+      if scalesBases.contains(base) && biasesBases.contains(base) {
+        quantizedBases.insert(base)
       }
     }
 
-    let mlxParams = MLXNN.ModuleParameters.unflattened(params)
+    // 2. Convert the matching `Linear` leaves into `QuantizedLinear` (groupSize 64,
+    //    4 bits, affine) so they expose weight/scales/biases parameters shaped to
+    //    receive the packed int4 values. `quantizeSingle` skips leaves that are
+    //    already quantized, so re-applying an int4 set is idempotent.
+    if !quantizedBases.isEmpty {
+      quantize(model: self) { path, _ in
+        quantizedBases.contains(path) ? (groupSize: 64, bits: 4, mode: .affine) : nil
+      }
+    }
+
+    // 3. Route every tensor straight into the model with no dequantization. The
+    //    QuantizedLinear leaves accept the packed uint32 weight + fp16 scales/biases
+    //    (+ fp16 bias); every other layer loads its fp16 weight unchanged.
+    let mlxParams = MLXNN.ModuleParameters.unflattened(weights.parameters)
     self.update(parameters: mlxParams)
     self.weights = weights
     self.isLoaded = true
@@ -274,7 +290,22 @@ public final class PixArtDiT: Module, Backbone, @unchecked Sendable {
 
   public func unload() {
     let telemetry = effectiveReporter
+
+    // Drop the stored input params, then replace every resident module parameter
+    // (including the packed int4 weight/scales/biases held by any QuantizedLinear
+    // leaves) with an empty array so the underlying buffers are released rather than
+    // lingering until the DiT is deallocated. A subsequent `apply(weights:)` routes
+    // the full, correctly-shaped weight set back in.
     self.weights = nil
+    let resident = self.parameters().flattened()
+    if !resident.isEmpty {
+      var cleared: [String: MLXArray] = [:]
+      cleared.reserveCapacity(resident.count)
+      for (key, array) in resident {
+        cleared[key] = MLXArray.zeros([0], dtype: array.dtype)
+      }
+      self.update(parameters: MLXNN.ModuleParameters.unflattened(cleared))
+    }
     self.isLoaded = false
 
     if let telemetry {
