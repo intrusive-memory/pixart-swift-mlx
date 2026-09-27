@@ -16,9 +16,9 @@ let package = Package(
   ],
   dependencies: [
     .package(
-      url: "https://github.com/intrusive-memory/SwiftTuberia.git", .upToNextMajor(from: "0.7.8")),
+      url: "https://github.com/intrusive-memory/SwiftTuberia.git", .upToNextMajor(from: "0.9.0")),
     .package(
-      url: "https://github.com/intrusive-memory/SwiftAcervo.git", .upToNextMajor(from: "0.20.0")),
+      url: "https://github.com/intrusive-memory/SwiftAcervo.git", .upToNextMajor(from: "0.25.0")),
     // 0.7.1 carries upstream 0.6.3's "Fixes for Xcode build with artifact
     // bundle", so the UniFFI artifactbundle links cleanly under xcodebuild (the
     // old RustBuffer/module-map blocker that held this at 0.5.x is resolved).

@@ -2,7 +2,7 @@
 
 This file provides comprehensive documentation for AI agents working with the pixart-swift-mlx codebase.
 
-**Version**: 0.8.0-dev
+**Version**: 0.8.2
 **Purpose**: Guide AI agents working on pixart-swift-mlx
 **Audience**: Claude Code, Gemini, and other AI development assistants
 
@@ -69,7 +69,7 @@ make help         # Show all targets
 
 ## SwiftAcervo integration
 
-This package depends on [SwiftAcervo](https://github.com/intrusive-memory/SwiftAcervo) **v0.16+** for component registration and shared model storage.
+This package depends on [SwiftAcervo](https://github.com/intrusive-memory/SwiftAcervo) **v0.25+** for component registration and shared model storage.
 
 ### What this package registers
 
