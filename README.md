@@ -28,7 +28,7 @@ Add to your `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/intrusive-memory/pixart-swift-mlx.git", from: "0.8.0")
+    .package(url: "https://github.com/intrusive-memory/pixart-swift-mlx.git", from: "0.8.2")
 ]
 ```
 
@@ -52,7 +52,7 @@ make help      # Show all targets
 
 ## SwiftAcervo integration
 
-This package depends on [SwiftAcervo](https://github.com/intrusive-memory/SwiftAcervo) **v0.16+**. It only registers component descriptors with Acervo's in-memory catalog — runtime weight loading happens in downstream consumers (e.g. SwiftVinetas) via `Acervo.ensureComponentReady(_:)` / `Acervo.availability(_:)`.
+This package depends on [SwiftAcervo](https://github.com/intrusive-memory/SwiftAcervo) **v0.25+**. It only registers component descriptors with Acervo's in-memory catalog — runtime weight loading happens in downstream consumers (e.g. SwiftVinetas) via `Acervo.ensureComponentReady(_:)` / `Acervo.availability(_:)`.
 
 If you consume PixArt-Sigma weights from your own app, **adopt the 0.16 "ask the library" model**:
 
