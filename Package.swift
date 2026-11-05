@@ -23,7 +23,7 @@ let package = Package(
     // Kept in lockstep with SwiftTuberia's tokenizers constraint.
     .package(
       url: "https://github.com/DePasqualeOrg/swift-tokenizers.git",
-      .upToNextMinor(from: "0.7.1")),
+      .upToNextMinor(from: "0.7.4")),
   ],
   targets: [
     .target(
