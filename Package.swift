@@ -15,7 +15,7 @@ let package = Package(
     )
   ],
   dependencies: [
-    .package(url: "https://github.com/intrusive-memory/SwiftTuberia.git", .upToNextMajor(from: "0.9.0")),
+    .package(url: "https://github.com/intrusive-memory/SwiftTuberia.git", .upToNextMajor(from: "0.10.0")),
     .package(url: "https://github.com/intrusive-memory/SwiftAcervo.git", .upToNextMajor(from: "0.25.0")),
     // 0.7.1 carries upstream 0.6.3's "Fixes for Xcode build with artifact
     // bundle", so the UniFFI artifactbundle links cleanly under xcodebuild (the
@@ -23,7 +23,7 @@ let package = Package(
     // Kept in lockstep with SwiftTuberia's tokenizers constraint.
     .package(
       url: "https://github.com/DePasqualeOrg/swift-tokenizers.git",
-      .upToNextMinor(from: "0.7.4")),
+      .upToNextMinor(from: "0.7.5")),
   ],
   targets: [
     .target(
