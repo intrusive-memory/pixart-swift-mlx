@@ -2,7 +2,7 @@
 
 This file provides comprehensive documentation for AI agents working with the pixart-swift-mlx codebase.
 
-**Version**: 0.8.2-dev
+**Version**: 0.9.0
 **Purpose**: Guide AI agents working on pixart-swift-mlx
 **Audience**: Claude Code, Gemini, and other AI development assistants
 
@@ -161,7 +161,7 @@ dit.setTelemetry(nil)  // clean up
 ## Queryable Codemap
 
 A prebuilt [graphify](https://pypi.org/project/graphifyy/) knowledge graph of this
-codebase lives in [`graphify-out/`](graphify-out/) (648 nodes · 944 edges). **Prefer
+codebase lives in [`graphify-out/`](graphify-out/) (808 nodes · 1178 edges). **Prefer
 querying it before grepping** for architecture or "what connects to what" questions:
 
 ```bash
