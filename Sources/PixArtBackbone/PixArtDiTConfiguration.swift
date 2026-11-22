@@ -151,8 +151,8 @@ public struct PixArtDiTConfiguration: Sendable {
   /// Returns the nearest aspect ratio bucket for the given resolution.
   ///
   /// Finds the bucket whose aspect ratio is closest to the requested aspect ratio.
-  /// The backbone uses this for micro-conditioning but generates at the exact
-  /// requested resolution.
+  /// Not a generation size: PixArt-Sigma 1024 must generate at a
+  /// ``binnedResolution(width:height:)`` bin.
   ///
   /// - Parameters:
   ///   - width: Requested image width in pixels.
@@ -171,5 +171,39 @@ public struct PixArtDiTConfiguration: Sendable {
       }
     }
     return bestBucket
+  }
+
+  // MARK: - Resolution Binning (generation sizes)
+
+  /// The sizes PixArt-Sigma-XL-2-1024-MS generates well at: diffusers'
+  /// `ASPECT_RATIO_1024_BIN`, keyed by its rounded height / width ratio.
+  ///
+  /// The 1024 model produces scrambled output far from these sizes (512×512
+  /// comes out as blocks of noise, in diffusers as well), so a request is
+  /// generated at its bin and then resized and center-cropped to the size
+  /// asked for, as `PixArtSigmaPipeline` does with `use_resolution_binning`.
+  public static let resolutionBins1024: [(heightOverWidth: Double, width: Int, height: Int)] = [
+    (0.25, 2048, 512), (0.28, 1856, 512), (0.32, 1792, 576), (0.33, 1728, 576),
+    (0.35, 1664, 576), (0.4, 1600, 640), (0.42, 1536, 640), (0.48, 1472, 704),
+    (0.5, 1408, 704), (0.52, 1344, 704), (0.57, 1344, 768), (0.6, 1280, 768),
+    (0.68, 1216, 832), (0.72, 1152, 832), (0.78, 1152, 896), (0.82, 1088, 896),
+    (0.88, 1088, 960), (0.94, 1024, 960), (1.0, 1024, 1024), (1.07, 960, 1024),
+    (1.13, 960, 1088), (1.21, 896, 1088), (1.29, 896, 1152), (1.38, 832, 1152),
+    (1.46, 832, 1216), (1.67, 768, 1280), (1.75, 768, 1344), (2.0, 704, 1408),
+    (2.09, 704, 1472), (2.4, 640, 1536), (2.5, 640, 1600), (3.0, 576, 1728),
+    (4.0, 512, 2048),
+  ]
+
+  /// The generation size for a requested `width` × `height`: the bin whose
+  /// height / width key is closest to the request's
+  /// (`PixArtImageProcessor.classify_height_width_bin`; the first bin wins a tie).
+  public static func binnedResolution(width: Int, height: Int) -> (width: Int, height: Int) {
+    let ratio = Double(height) / Double(width)
+    var best = resolutionBins1024[0]
+    for bin in resolutionBins1024
+    where abs(bin.heightOverWidth - ratio) < abs(best.heightOverWidth - ratio) {
+      best = bin
+    }
+    return (best.width, best.height)
   }
 }
