@@ -2,7 +2,7 @@
 
 This file provides comprehensive documentation for AI agents working with the pixart-swift-mlx codebase.
 
-**Version**: 0.9.0
+**Version**: 0.10.0
 **Purpose**: Guide AI agents working on pixart-swift-mlx
 **Audience**: Claude Code, Gemini, and other AI development assistants
 
@@ -66,6 +66,7 @@ make help         # Show all targets
 4. ALWAYS read files before editing
 5. NEVER create files unless necessary
 6. Follow agent-specific instructions — see [CLAUDE.md](CLAUDE.md) or [GEMINI.md](GEMINI.md)
+7. NEVER generate at a size that isn't a `resolutionBins1024` bin: the 1024 model scrambles its output elsewhere (512×512 is noise, in diffusers too). Generate at `binnedResolution(width:height:)` and resize. Check suspected model bugs against diffusers at 1024 before assuming the Swift code is wrong.
 
 ## SwiftAcervo integration
 
@@ -161,7 +162,7 @@ dit.setTelemetry(nil)  // clean up
 ## Queryable Codemap
 
 A prebuilt [graphify](https://pypi.org/project/graphifyy/) knowledge graph of this
-codebase lives in [`graphify-out/`](graphify-out/) (808 nodes · 1178 edges). **Prefer
+codebase lives in [`graphify-out/`](graphify-out/) (794 nodes · 1181 edges). **Prefer
 querying it before grepping** for architecture or "what connects to what" questions:
 
 ```bash

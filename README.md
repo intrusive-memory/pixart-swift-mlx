@@ -28,7 +28,7 @@ Add to your `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/intrusive-memory/pixart-swift-mlx.git", from: "0.9.0")
+    .package(url: "https://github.com/intrusive-memory/pixart-swift-mlx.git", from: "0.10.0")
 ]
 ```
 
@@ -49,6 +49,10 @@ make test-all  # Run all tests (Swift + Python)
 make lint      # Format Swift sources
 make help      # Show all targets
 ```
+
+## Generation sizes
+
+PixArt-Sigma-XL-2-1024-MS generates well only near its 1024-class training sizes: a 512×512 request comes out as blocks of noise (in diffusers as well). Generate at `PixArtDiTConfiguration.binnedResolution(width:height:)`, the nearest of diffusers' 33 `ASPECT_RATIO_1024_BIN` sizes (`resolutionBins1024`), then resize and center-crop to the size wanted, as diffusers' `PixArtSigmaPipeline` does. SwiftVinetas's PixArt engine does this for you.
 
 ## SwiftAcervo integration
 
